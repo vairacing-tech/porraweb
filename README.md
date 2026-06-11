@@ -22,26 +22,28 @@ El maximo goleador se elige en dos pasos: seleccion y jugador convocado. Si una 
 
 Desde `Perfil -> Admin`, el admin puede:
 
-- Cargar convocatorias desde API-Football.
-- Sincronizar resultados.
+- Cargar convocatorias desde la tabla local `squad_players`.
+- Sincronizar resultados con OpenLigaDB y usar API-Football solo como fallback opcional.
 - Resetear contrasenas de participantes.
 - Modificar resultados reales.
 - Marcar o quitar puntos dobles.
 - Modificar el pronostico de un participante para un partido.
 
-## API-Football y limite diario
+## Datos externos
 
-La clave se configura como secreto `API_FOOTBALL_KEY`; no se guarda en el repo.
+El proveedor principal de calendario/resultados es OpenLigaDB:
 
-El plan Free probado devuelve que no tiene acceso a `fixtures?league=1&season=2026`. Por eso el sincronizador de convocatorias usa este fallback:
+- `OPENLIGADB_BASE_URL=https://api.openligadb.de`
+- `OPENLIGADB_LEAGUE_SHORTCUT=wm2026`
+- `OPENLIGADB_SEASON=2026`
 
-1. Intenta descubrir equipos con el calendario 2026.
-2. Si el plan no lo permite, resuelve IDs de selecciones con `teams?name=...`.
-3. Carga convocatorias con `players/squads?team=...`.
+El shortcut `wm2026` esta en configuracion, no en codigo. Si OpenLigaDB publica el Mundial con otro shortcut, cambia `OPENLIGADB_LEAGUE_SHORTCUT` en `wrangler.toml`, `wrangler.sync.toml` y en los vars/secrets del entorno si aplica.
 
-El presupuesto operativo esta en `API_FOOTBALL_DAILY_BUDGET=70` para no acercarse al limite de 100 requests/dia. Si no da tiempo a cargar todas las convocatorias en un dia, vuelve a pulsar `Cargar convocatorias` al dia siguiente.
+API-Football queda solo como fallback opcional si existe `API_FOOTBALL_KEY`. La clave se configura como secreto y no se guarda en el repo.
 
-Los moviles nunca llaman a API-Football directamente: solo consultan datos cacheados en D1.
+Las convocatorias iniciales se cargan desde `migrations/0002_seed_squads.sql`, generada desde los CSV de equipos/jugadores. Usa IDs internos negativos para no fingir IDs externos.
+
+Los moviles nunca llaman a proveedores externos directamente: solo consultan datos cacheados en D1.
 
 ## Despliegue en Cloudflare
 
@@ -91,6 +93,8 @@ Pega la key cuando Wrangler la pida. No la escribas en archivos del repo.
 ```bash
 npm run cf:migrate:remote
 ```
+
+La migracion `0002_seed_squads.sql` carga 48 selecciones y 1247 jugadores en `squad_players`, mas alias de equipos y jugadores.
 
 ### 7. Desplegar Pages y Worker Cron
 

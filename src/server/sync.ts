@@ -1,6 +1,7 @@
 import { recalculateMatch } from "./db";
 import { ensureSeeded } from "./db";
 import { createId } from "./crypto";
+import { fetchOpenLigaDbMatches, fetchOpenLigaDbTeams, parseOpenLigaDbMatch, type ParsedOpenLigaDbMatch } from "./providers/openligadb";
 import type { Env } from "./types";
 
 type ApiFootballFixture = {
@@ -109,17 +110,75 @@ const apiNameToTeamId: Record<string, string> = {
   "uzbekistan": "uzbekistan"
 };
 
+const providerNameToTeamId: Record<string, string> = {
+  ...apiNameToTeamId,
+  "agypten": "egipto",
+  "aegypten": "egipto",
+  "algerien": "argelia",
+  "argentinien": "argentina",
+  "australien": "australia",
+  "belgien": "belgica",
+  "bosnien und herzegowina": "bosnia-y-herzegovina",
+  "brasilien": "brasil",
+  "deutschland": "alemania",
+  "dr kongo": "rd-congo",
+  "elfenbeinkuste": "costa-de-marfil",
+  "england": "inglaterra",
+  "frankreich": "francia",
+  "iran": "iran",
+  "irak": "irak",
+  "japan": "japon",
+  "kanada": "canada",
+  "kap verde": "cabo-verde",
+  "katar": "catar",
+  "kolumbien": "colombia",
+  "kroatien": "croacia",
+  "marokko": "marruecos",
+  "mexiko": "mexico",
+  "neuseeland": "nueva-zelanda",
+  "niederlande": "paises-bajos",
+  "norwegen": "noruega",
+  "osterreich": "austria",
+  "oesterreich": "austria",
+  "saudi arabien": "arabia-saudi",
+  "schottland": "escocia",
+  "schweden": "suecia",
+  "schweiz": "suiza",
+  "spanien": "espana",
+  "sudafrika": "sudafrica",
+  "suedafrika": "sudafrica",
+  "tschechien": "republica-checa",
+  "tunesien": "tunez",
+  "turkei": "turquia",
+  "tuerkei": "turquia",
+  "usbekistan": "uzbekistan",
+  "vereinigte staaten": "estados-unidos"
+};
+
 const teamIdToApiSearchName = Object.entries(apiNameToTeamId).reduce<Record<string, string>>((accumulator, [apiName, localId]) => {
   if (!accumulator[localId]) accumulator[localId] = apiName;
+  return accumulator;
+}, {});
+
+const normalizedProviderNameToTeamId = Object.entries(providerNameToTeamId).reduce<Record<string, string>>((accumulator, [name, localId]) => {
+  accumulator[normalizeProviderName(name)] = localId;
   return accumulator;
 }, {});
 
 export async function runSquadSync(env: Env): Promise<{ ok: boolean; requestsUsed: number; message: string }> {
   await ensureSeeded(env);
 
+  const localSquads = await getLocalSquadSummary(env);
+  if (localSquads.players > 0) {
+    const message = `Convocatorias locales cargadas: ${localSquads.players} jugadores en ${localSquads.teams} selecciones.`;
+    await logSync(env, "ok", 0, message, "local-squads");
+    return { ok: true, requestsUsed: 0, message };
+  }
+
   if (!env.API_FOOTBALL_KEY) {
-    await logSync(env, "skipped", 0, "API_FOOTBALL_KEY no configurada.", "api-football-squads");
-    return { ok: false, requestsUsed: 0, message: "API_FOOTBALL_KEY no configurada." };
+    const message = "No hay convocatorias locales y API_FOOTBALL_KEY no esta configurada. Aplica la migracion 0002_seed_squads.sql.";
+    await logSync(env, "skipped", 0, message, "local-squads");
+    return { ok: false, requestsUsed: 0, message };
   }
 
   const budget = Number(env.API_FOOTBALL_DAILY_BUDGET || 70);
@@ -175,7 +234,55 @@ export async function runSquadSync(env: Env): Promise<{ ok: boolean; requestsUse
   return { ok: true, requestsUsed, message };
 }
 
+async function getLocalSquadSummary(env: Env): Promise<{ players: number; teams: number }> {
+  const row = await env.DB.prepare(
+    "SELECT COUNT(*) AS players, COUNT(DISTINCT team_id) AS teams FROM squad_players"
+  ).first<{ players: number; teams: number }>();
+  return { players: row?.players ?? 0, teams: row?.teams ?? 0 };
+}
+
 export async function runResultSync(env: Env): Promise<{ ok: boolean; requestsUsed: number; message: string }> {
+  const openLigaDbResult = await runOpenLigaDbResultSync(env);
+  if (openLigaDbResult.usedProvider || !env.API_FOOTBALL_KEY) {
+    return openLigaDbResult;
+  }
+
+  const fallbackResult = await runApiFootballResultSync(env);
+  return {
+    ok: fallbackResult.ok,
+    requestsUsed: fallbackResult.requestsUsed,
+    message: `OpenLigaDB sin datos; fallback API-Football: ${fallbackResult.message}`
+  };
+}
+
+async function runOpenLigaDbResultSync(env: Env): Promise<{ ok: boolean; requestsUsed: number; message: string; usedProvider: boolean }> {
+  await ensureSeeded(env);
+
+  try {
+    const teams = await fetchOpenLigaDbTeams(env);
+    const teamsUpdated = await applyOpenLigaDbTeams(env, teams);
+    const matches = await fetchOpenLigaDbMatches(env);
+
+    if (matches.length === 0) {
+      const message = "OpenLigaDB no devolvio partidos para la configuracion actual.";
+      await logSync(env, "skipped", 0, message, "openligadb");
+      return { ok: true, requestsUsed: 0, message, usedProvider: false };
+    }
+
+    const parsedMatches = matches.map(parseOpenLigaDbMatch);
+    const { linked, updated } = await applyOpenLigaDbMatches(env, parsedMatches);
+    const message = `OpenLigaDB: ${matches.length} partidos leidos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado.`;
+    await logSync(env, "ok", 0, message, "openligadb");
+    return { ok: true, requestsUsed: 0, message, usedProvider: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Error sincronizando OpenLigaDB.";
+    console.error("OPENLIGADB SYNC ERROR", error);
+    await logSync(env, "error", 0, message, "openligadb");
+    return { ok: false, requestsUsed: 0, message, usedProvider: false };
+  }
+}
+
+async function runApiFootballResultSync(env: Env): Promise<{ ok: boolean; requestsUsed: number; message: string }> {
   await ensureSeeded(env);
 
   if (!env.API_FOOTBALL_KEY) {
@@ -236,6 +343,75 @@ export async function runResultSync(env: Env): Promise<{ ok: boolean; requestsUs
   const message = `Sincronizados ${updated} partidos con ${requestsUsed} request(s).`;
   await logSync(env, "ok", requestsUsed, message);
   return { ok: true, requestsUsed, message };
+}
+
+async function applyOpenLigaDbTeams(env: Env, teams: Array<{ teamName: string; teamIconUrl?: string | null }>): Promise<number> {
+  let updated = 0;
+  for (const team of teams) {
+    const localTeamId = resolveProviderTeamId(team.teamName);
+    if (!localTeamId) continue;
+    const result = await env.DB.prepare("UPDATE teams SET logo_url = COALESCE(?1, logo_url) WHERE id = ?2")
+      .bind(team.teamIconUrl ?? null, localTeamId)
+      .run();
+    updated += result.meta.changes ?? 0;
+  }
+  return updated;
+}
+
+async function applyOpenLigaDbMatches(env: Env, parsedMatches: ParsedOpenLigaDbMatch[]): Promise<{ linked: number; updated: number }> {
+  const targets = await getAllMatchTargets(env);
+  let linked = 0;
+  let updated = 0;
+
+  for (const parsed of parsedMatches) {
+    const match = findMatchingOpenLigaDbTarget(targets, parsed);
+    if (!match) continue;
+
+    const now = new Date().toISOString();
+    await env.DB.prepare(
+      `UPDATE matches
+       SET api_fixture_id = ?1, kickoff_at = ?2, lock_at = ?3, status = ?4,
+           home_score = ?5, away_score = ?6, updated_at = ?7
+       WHERE id = ?8`
+    )
+      .bind(parsed.providerMatchId, parsed.kickoffAt, parsed.lockAt, parsed.status, parsed.homeScore, parsed.awayScore, now, match.id)
+      .run();
+
+    linked += 1;
+    if (parsed.status === "finished" && parsed.homeScore !== null && parsed.awayScore !== null) {
+      await recalculateMatch(env, match.id);
+      updated += 1;
+    }
+  }
+
+  return { linked, updated };
+}
+
+async function getAllMatchTargets(env: Env): Promise<MatchSyncRow[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, api_fixture_id, kickoff_at, home_team_id, away_team_id
+     FROM matches
+     ORDER BY kickoff_at ASC`
+  ).all<MatchSyncRow>();
+  return results;
+}
+
+function findMatchingOpenLigaDbTarget(targets: MatchSyncRow[], parsed: ParsedOpenLigaDbMatch): MatchSyncRow | null {
+  const byId = targets.find((match) => match.api_fixture_id === parsed.providerMatchId);
+  if (byId) return byId;
+
+  const home = resolveProviderTeamId(parsed.homeTeam.name);
+  const away = resolveProviderTeamId(parsed.awayTeam.name);
+  if (!home || !away) return null;
+
+  const fixtureTime = new Date(parsed.kickoffAt).getTime();
+  return (
+    targets.find((match) => {
+      const sameTeams = match.home_team_id === home && match.away_team_id === away;
+      const closeKickoff = Math.abs(new Date(match.kickoff_at).getTime() - fixtureTime) <= 12 * 60 * 60 * 1000;
+      return sameTeams && closeKickoff;
+    }) || null
+  );
 }
 
 async function getTargetMatches(env: Env): Promise<MatchSyncRow[]> {
@@ -426,6 +602,20 @@ function normalizeApiName(name: string): string {
         .toLowerCase()
     ] || ""
   );
+}
+
+function resolveProviderTeamId(name: string): string {
+  const normalized = normalizeProviderName(name);
+  return normalizedProviderNameToTeamId[normalized] || normalized.replace(/\s+/g, "-");
+}
+
+function normalizeProviderName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function mapStatus(status: string): "scheduled" | "live" | "finished" | "postponed" | "cancelled" {

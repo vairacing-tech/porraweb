@@ -202,6 +202,13 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
     throw new HttpError(404, "Ruta no encontrada.");
   } catch (error) {
+    try {
+      if (new URL(request.url).pathname.replace(/^\/api\/?/, "").split("/").filter(Boolean)[0] === "bootstrap") {
+        console.error("BOOTSTRAP ERROR", error);
+      }
+    } catch {
+      console.error("BOOTSTRAP ERROR", error);
+    }
     return toErrorResponse(error);
   }
 }

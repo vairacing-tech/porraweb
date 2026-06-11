@@ -45,55 +45,55 @@ export async function ensureSeeded(env: Env): Promise<void> {
 
   await ensureAdminUser(env, now);
 
-  const existingMatches = await env.DB.prepare("SELECT id FROM matches LIMIT 1").first();
-  if (existingMatches) {
-    return;
+  const teamCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM teams").first<{ count: number }>();
+  if ((teamCount?.count ?? 0) < initialTeams.length) {
+    await insertRows(
+      env.DB,
+      "teams",
+      ["id", "name", "short_code", "api_team_id", "logo_url", "created_at"],
+      initialTeams.map((team) => [team.id, team.name, team.shortCode, null, null, now])
+    );
   }
 
-  await insertRows(
-    env.DB,
-    "teams",
-    ["id", "name", "short_code", "api_team_id", "logo_url", "created_at"],
-    initialTeams.map((team) => [team.id, team.name, team.shortCode, null, null, now])
-  );
-
-  await insertRows(
-    env.DB,
-    "matches",
-    [
-      "id",
-      "api_fixture_id",
-      "stage",
-      "round",
-      "matchday",
-      "group_name",
-      "home_team_id",
-      "away_team_id",
-      "kickoff_at",
-      "lock_at",
-      "status",
-      "is_double_points",
-      "updated_at",
-      "created_at"
-    ],
-    initialMatches.map((match) => [
-      match.id,
-      null,
-      match.stage,
-      match.round,
-      match.matchday,
-      match.groupName,
-      match.homeTeamId,
-      match.awayTeamId,
-      match.kickoffAt,
-      match.lockAt,
-      "scheduled",
-      match.isDoublePoints ? 1 : 0,
-      now,
-      now
-    ])
-  );
-
+  const matchCount = await env.DB.prepare("SELECT COUNT(*) AS count FROM matches").first<{ count: number }>();
+  if ((matchCount?.count ?? 0) < initialMatches.length) {
+    await insertRows(
+      env.DB,
+      "matches",
+      [
+        "id",
+        "api_fixture_id",
+        "stage",
+        "round",
+        "matchday",
+        "group_name",
+        "home_team_id",
+        "away_team_id",
+        "kickoff_at",
+        "lock_at",
+        "status",
+        "is_double_points",
+        "updated_at",
+        "created_at"
+      ],
+      initialMatches.map((match) => [
+        match.id,
+        null,
+        match.stage,
+        match.round,
+        match.matchday,
+        match.groupName,
+        match.homeTeamId,
+        match.awayTeamId,
+        match.kickoffAt,
+        match.lockAt,
+        "scheduled",
+        match.isDoublePoints ? 1 : 0,
+        now,
+        now
+      ])
+    );
+  }
 }
 
 async function ensureAdminUser(env: Env, now: string): Promise<void> {
@@ -108,17 +108,18 @@ async function ensureAdminUser(env: Env, now: string): Promise<void> {
     .run();
 }
 
-async function insertRows(db: D1Database, table: string, columns: string[], rows: unknown[][]): Promise<void> {
+export async function insertRows(db: D1Database, table: string, columns: string[], rows: unknown[][]): Promise<void> {
   if (rows.length === 0) return;
-  const maxRowsPerStatement = Math.max(1, Math.floor(900 / columns.length));
+  const placeholders = columns.map(() => "?").join(", ");
+  const sql = `INSERT OR IGNORE INTO ${table} (${columns.join(", ")}) VALUES (${placeholders})`;
 
-  for (let start = 0; start < rows.length; start += maxRowsPerStatement) {
-    const chunk = rows.slice(start, start + maxRowsPerStatement);
-    const placeholders = chunk
-      .map((_, rowIndex) => `(${columns.map((__, columnIndex) => `?${rowIndex * columns.length + columnIndex + 1}`).join(", ")})`)
-      .join(", ");
-    const values = chunk.flat();
-    await db.prepare(`INSERT OR IGNORE INTO ${table} (${columns.join(", ")}) VALUES ${placeholders}`).bind(...values).run();
+  for (const [index, row] of rows.entries()) {
+    try {
+      await db.prepare(sql).bind(...row).run();
+    } catch (error) {
+      console.error("D1 INSERT ERROR", { table, columns, rowIndex: index, rowCount: rows.length, error });
+      throw error;
+    }
   }
 }
 

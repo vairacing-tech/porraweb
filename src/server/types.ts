@@ -4,6 +4,9 @@ export interface Env {
   LEAGUE_NAME?: string;
   API_FOOTBALL_KEY?: string;
   API_FOOTBALL_DAILY_BUDGET?: string;
+  OPENLIGADB_BASE_URL?: string;
+  OPENLIGADB_LEAGUE_SHORTCUT?: string;
+  OPENLIGADB_SEASON?: string;
 }
 
 export interface AuthUser {

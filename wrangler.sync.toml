@@ -9,6 +9,9 @@ database_id = "9b01ada1-d9ce-480e-a223-a3f96b69a3ee"
 
 [vars]
 API_FOOTBALL_DAILY_BUDGET = "70"
+OPENLIGADB_BASE_URL = "https://api.openligadb.de"
+OPENLIGADB_LEAGUE_SHORTCUT = "wm2026"
+OPENLIGADB_SEASON = "2026"
 
 [triggers]
 crons = ["*/30 * * * *"]

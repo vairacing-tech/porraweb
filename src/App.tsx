@@ -417,7 +417,7 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
   async function handleSquadSync() {
     try {
       if (data.isDemo) {
-        onNotice("Convocatorias demo ya cargadas.");
+        onNotice("Modo demo sin D1: aplica migraciones en Cloudflare para cargar convocatorias reales.");
       } else {
         const result = await syncSquads();
         onNotice(`${result.message} Requests usados: ${result.requestsUsed}.`);
