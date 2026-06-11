@@ -12,7 +12,7 @@
     "cf:dev": "wrangler pages dev dist --d1 DB=porra-fortilin",
     "cf:migrate:local": "wrangler d1 migrations apply porra-fortilin --local",
     "cf:migrate:remote": "wrangler d1 migrations apply porra-fortilin --remote",
-    "cf:deploy": "wrangler pages deploy dist --project-name porra-fortilin",
+    "cf:deploy": "wrangler pages deploy dist --project-name porra-fortilin --branch main --functions functions --commit-dirty=true",
     "cf:deploy:sync": "wrangler deploy --config wrangler.sync.toml"
   },
   "dependencies": {
