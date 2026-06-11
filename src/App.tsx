@@ -316,7 +316,7 @@ function MatchGoals({ match, compact = false }: { match: Match; compact?: boolea
       {match.goals.map((goal, index) => (
         <span key={`${match.id}-goal-${index}`}>
           {goal.minute ? `${goal.minute}' ` : ""}
-          {goal.scorerName || "Gol"} {goal.isPenalty ? "(p)" : goal.isOwnGoal ? "(pp)" : ""} · {goal.homeScore}-{goal.awayScore}
+          {formatGoal(goal)} · {goal.homeScore}-{goal.awayScore}
         </span>
       ))}
     </div>
@@ -946,6 +946,10 @@ function matchSummary(match: Match): string {
   const score = hasScore(match) ? `${match.homeScore}-${match.awayScore}` : null;
   const status = match.status === "live" || match.status === "finished" ? matchStatusLabel(match) : null;
   return [status, score].filter(Boolean).join(" · ") || "Programado";
+}
+
+function formatGoal(goal: Match["goals"][number]): string {
+  return [goal.scorerName || "Gol", goal.isPenalty ? "(p)" : goal.isOwnGoal ? "(pp)" : ""].filter(Boolean).join(" ");
 }
 
 function getTopScorers(matches: Match[]): ScorerRow[] {
