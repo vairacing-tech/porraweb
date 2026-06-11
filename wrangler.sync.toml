@@ -14,4 +14,8 @@ OPENLIGADB_LEAGUE_SHORTCUT = "wm2026"
 OPENLIGADB_SEASON = "2026"
 
 [triggers]
-crons = ["*/30 * * * *"]
+crons = [
+  "*/5 16-23 * * *",
+  "*/5 0-3 * * *",
+  "0 4-15 * * *"
+]

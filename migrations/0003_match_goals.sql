@@ -1,0 +1,1 @@
+ALTER TABLE matches ADD COLUMN goals_json TEXT NOT NULL DEFAULT '[]';

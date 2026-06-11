@@ -1,6 +1,6 @@
 import { getLockAt } from "../../domain/scoring";
 import { teamId } from "../../shared/fixtures";
-import type { MatchStatus, Team } from "../../shared/types";
+import type { MatchGoal, MatchStatus, Team } from "../../shared/types";
 import type { Env } from "../types";
 
 export type OpenLigaDbTeam = {
@@ -29,6 +29,16 @@ export type OpenLigaDbMatch = {
   team2: OpenLigaDbTeam;
   matchIsFinished: boolean;
   matchResults?: OpenLigaDbResult[];
+  goals?: Array<{
+    goalID?: number;
+    scoreTeam1: number;
+    scoreTeam2: number;
+    matchMinute?: number | null;
+    goalGetterName?: string | null;
+    isPenalty?: boolean;
+    isOwnGoal?: boolean;
+    isOvertime?: boolean;
+  }>;
   group?: {
     groupName?: string;
     groupOrderID?: number;
@@ -47,6 +57,7 @@ export type ParsedOpenLigaDbMatch = {
   status: MatchStatus;
   homeScore: number | null;
   awayScore: number | null;
+  goals: MatchGoal[];
 };
 
 type OpenLigaDbConfig = {
@@ -103,8 +114,23 @@ export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMa
     groupName: match.group?.groupName ?? null,
     status,
     homeScore: finalResult?.pointsTeam1 ?? null,
-    awayScore: finalResult?.pointsTeam2 ?? null
+    awayScore: finalResult?.pointsTeam2 ?? null,
+    goals: parseGoals(match.goals || [])
   };
+}
+
+function parseGoals(goals: NonNullable<OpenLigaDbMatch["goals"]>): MatchGoal[] {
+  return goals
+    .filter((goal) => Number.isFinite(goal.scoreTeam1) && Number.isFinite(goal.scoreTeam2))
+    .map((goal) => ({
+      minute: goal.matchMinute ?? null,
+      scorerName: goal.goalGetterName?.trim() || null,
+      homeScore: goal.scoreTeam1,
+      awayScore: goal.scoreTeam2,
+      isPenalty: goal.isPenalty === true,
+      isOwnGoal: goal.isOwnGoal === true,
+      isOvertime: goal.isOvertime === true
+    }));
 }
 
 export function selectFinalResult(results: OpenLigaDbResult[]): OpenLigaDbResult | null {

@@ -371,10 +371,20 @@ async function applyOpenLigaDbMatches(env: Env, parsedMatches: ParsedOpenLigaDbM
     await env.DB.prepare(
       `UPDATE matches
        SET api_fixture_id = ?1, kickoff_at = ?2, lock_at = ?3, status = ?4,
-           home_score = ?5, away_score = ?6, updated_at = ?7
-       WHERE id = ?8`
+           home_score = ?5, away_score = ?6, goals_json = ?7, updated_at = ?8
+       WHERE id = ?9`
     )
-      .bind(parsed.providerMatchId, parsed.kickoffAt, parsed.lockAt, parsed.status, parsed.homeScore, parsed.awayScore, now, match.id)
+      .bind(
+        parsed.providerMatchId,
+        parsed.kickoffAt,
+        parsed.lockAt,
+        parsed.status,
+        parsed.homeScore,
+        parsed.awayScore,
+        JSON.stringify(parsed.goals),
+        now,
+        match.id
+      )
       .run();
 
     linked += 1;

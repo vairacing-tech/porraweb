@@ -20,6 +20,16 @@ export interface SquadPlayer {
   photoUrl: string | null;
 }
 
+export interface MatchGoal {
+  minute: number | null;
+  scorerName: string | null;
+  homeScore: number;
+  awayScore: number;
+  isPenalty: boolean;
+  isOwnGoal: boolean;
+  isOvertime: boolean;
+}
+
 export interface Match {
   id: string;
   apiFixtureId?: number | null;
@@ -38,6 +48,7 @@ export interface Match {
   extraAwayScore?: number | null;
   penaltyHomeScore?: number | null;
   penaltyAwayScore?: number | null;
+  goals: MatchGoal[];
   isDoublePoints: boolean;
 }
 

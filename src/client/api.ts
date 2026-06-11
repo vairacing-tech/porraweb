@@ -160,6 +160,7 @@ function demoBootstrap(): BootstrapData {
     extraAwayScore: null,
     penaltyHomeScore: null,
     penaltyAwayScore: null,
+    goals: [],
     isDoublePoints: match.isDoublePoints,
     myPrediction: null
   })) satisfies BootstrapData["matches"];

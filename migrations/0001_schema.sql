@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS matches (
   extra_away_score INTEGER,
   penalty_home_score INTEGER,
   penalty_away_score INTEGER,
+  goals_json TEXT NOT NULL DEFAULT '[]',
   is_double_points INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL,
   created_at TEXT NOT NULL

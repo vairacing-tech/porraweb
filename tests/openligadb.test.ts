@@ -15,6 +15,10 @@ describe("OpenLigaDB provider", () => {
       matchResults: [
         { resultTypeID: 1, resultName: "Halbzeit", pointsTeam1: 1, pointsTeam2: 0 },
         { resultTypeID: 2, resultName: "Endergebnis", pointsTeam1: 2, pointsTeam2: 1 }
+      ],
+      goals: [
+        { scoreTeam1: 1, scoreTeam2: 0, matchMinute: 22, goalGetterName: "Jugador Uno" },
+        { scoreTeam1: 2, scoreTeam2: 0, matchMinute: 48, goalGetterName: "Jugador Dos" }
       ]
     });
 
@@ -28,6 +32,10 @@ describe("OpenLigaDB provider", () => {
       homeTeam: { id: "mexico", shortCode: "MEX" },
       awayTeam: { id: "south-africa", shortCode: "RSA" }
     });
+    expect(parsed.goals).toEqual([
+      { minute: 22, scorerName: "Jugador Uno", homeScore: 1, awayScore: 0, isPenalty: false, isOwnGoal: false, isOvertime: false },
+      { minute: 48, scorerName: "Jugador Dos", homeScore: 2, awayScore: 0, isPenalty: false, isOwnGoal: false, isOvertime: false }
+    ]);
   });
 
   it("prefers resultTypeID 2 as final result", () => {

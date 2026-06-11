@@ -35,6 +35,12 @@ type Tab = "home" | "matches" | "leaderboard" | "bonus" | "profile";
 
 type ScoreDraft = Record<string, { home: number; away: number }>;
 
+type ScorerRow = {
+  player: string;
+  teamName: string;
+  goals: number;
+};
+
 export function App() {
   const [data, setData] = useState<BootstrapData | null>(null);
   const [tab, setTab] = useState<Tab>("home");
@@ -221,7 +227,7 @@ function HomeView({
 function NextMatchHero({ match }: { match: Match }) {
   return (
     <section className="next-hero">
-      <div className="hero-pill">Próximo partido</div>
+      <div className={`hero-pill ${match.status === "live" ? "live" : ""}`}>{matchStatusLabel(match)}</div>
       <div className="hero-teams">
         <TeamBadge team={match.homeTeam} large />
         <div className="hero-names">
@@ -231,6 +237,8 @@ function NextMatchHero({ match }: { match: Match }) {
         </div>
         <TeamBadge team={match.awayTeam} large />
       </div>
+      {hasScore(match) ? <div className="hero-score">{match.homeScore} - {match.awayScore}</div> : null}
+      <MatchGoals match={match} compact />
       <div className="hero-meta">
         <span><CalendarDays size={15} /> {formatDate(match.kickoffAt)}</span>
         <span>{formatTime(match.kickoffAt)} Madrid</span>
@@ -286,6 +294,10 @@ function PredictionCard({
         <ScoreStepper value={draft.away} disabled={locked} onDec={() => change("away", -1)} onInc={() => change("away", 1)} />
         <TeamInline team={match.awayTeam} align="right" />
       </div>
+      {hasScore(match) ? (
+        <p className="live-score-line">{matchStatusLabel(match)} · Resultado actual: {match.homeScore} - {match.awayScore}</p>
+      ) : null}
+      <MatchGoals match={match} />
       <div className="card-actions">
         {match.isDoublePoints ? <span className="double-chip">Puntos x2</span> : <span />}
         <button className="save-button" type="button" disabled={locked} onClick={() => onSave(match)}>
@@ -293,6 +305,21 @@ function PredictionCard({
         </button>
       </div>
     </section>
+  );
+}
+
+function MatchGoals({ match, compact = false }: { match: Match; compact?: boolean }) {
+  if (!match.goals || match.goals.length === 0) return null;
+
+  return (
+    <div className={`goal-list ${compact ? "compact-goals" : ""}`}>
+      {match.goals.map((goal, index) => (
+        <span key={`${match.id}-goal-${index}`}>
+          {goal.minute ? `${goal.minute}' ` : ""}
+          {goal.scorerName || "Gol"} {goal.isPenalty ? "(p)" : goal.isOwnGoal ? "(pp)" : ""} · {goal.homeScore}-{goal.awayScore}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -356,6 +383,7 @@ function BonusView({ data }: { data: BootstrapData }) {
   const teamById = new Map(data.teams.map((team) => [team.id, team]));
   const bonus = data.bonus;
   const scorerTeam = bonus?.topScorerTeamId ? teamById.get(bonus.topScorerTeamId)?.name : null;
+  const scorers = getTopScorers(data.matches);
   return (
     <section className="view-stack">
       <div className="view-header">
@@ -366,6 +394,26 @@ function BonusView({ data }: { data: BootstrapData }) {
         <BonusLine label="Campeón" value={bonus?.championTeamId ? teamById.get(bonus.championTeamId)?.name : null} />
         <BonusLine label="Subcampeón" value={bonus?.runnerUpTeamId ? teamById.get(bonus.runnerUpTeamId)?.name : null} />
         <BonusLine label="Máximo goleador" value={bonus?.topScorer ? `${bonus.topScorer}${scorerTeam ? ` (${scorerTeam})` : ""}` : null} />
+      </div>
+      <div className="card scorer-card">
+        <div className="section-title">
+          <Trophy size={18} />
+          <span>Goleadores</span>
+        </div>
+        {scorers.length === 0 ? (
+          <p className="empty-state">OpenLigaDB todavia no ha publicado goleadores con nombre.</p>
+        ) : (
+          <div className="scorer-list">
+            {scorers.map((scorer, index) => (
+              <div className="scorer-row" key={`${scorer.player}-${scorer.teamName}`}>
+                <span>{index + 1}</span>
+                <strong>{scorer.player}</strong>
+                <em>{scorer.teamName}</em>
+                <b>{scorer.goals}</b>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
       <div className="rules-card">
         <strong>Reglas rapidas</strong>
@@ -780,7 +828,7 @@ function TodayCard({ matches, onOpen }: { matches: Match[]; onOpen: () => void }
             <small>vs</small>
             <span>{shortTeam(match.awayTeam.name)}</span>
             <TeamBadge team={match.awayTeam} />
-            <em>{formatDate(match.kickoffAt)} · {formatTime(match.kickoffAt)}</em>
+            <em>{matchSummary(match)} · {formatDate(match.kickoffAt)} · {formatTime(match.kickoffAt)}</em>
           </div>
         ))}
       </div>
@@ -881,6 +929,49 @@ function getRelevantMatches<T extends Match>(matches: T[]): T[] {
   const current = findCurrentMatch(sorted);
   if (!current) return sorted;
   return [current, ...sorted.filter((match) => match.id !== current.id)];
+}
+
+function hasScore(match: Match): boolean {
+  return match.homeScore !== null && match.homeScore !== undefined && match.awayScore !== null && match.awayScore !== undefined;
+}
+
+function matchStatusLabel(match: Match): string {
+  if (match.status === "live") return "En curso";
+  if (match.status === "finished") return "Finalizado";
+  if (isPredictionLocked(match.kickoffAt)) return "Bloqueado";
+  return "Próximo partido";
+}
+
+function matchSummary(match: Match): string {
+  const score = hasScore(match) ? `${match.homeScore}-${match.awayScore}` : null;
+  const status = match.status === "live" || match.status === "finished" ? matchStatusLabel(match) : null;
+  return [status, score].filter(Boolean).join(" · ") || "Programado";
+}
+
+function getTopScorers(matches: Match[]): ScorerRow[] {
+  const scorers = new Map<string, ScorerRow>();
+
+  for (const match of matches) {
+    let previousHome = 0;
+    let previousAway = 0;
+    for (const goal of match.goals || []) {
+      if (!goal.scorerName) {
+        previousHome = goal.homeScore;
+        previousAway = goal.awayScore;
+        continue;
+      }
+
+      const teamName = goal.homeScore > previousHome ? match.homeTeam.name : goal.awayScore > previousAway ? match.awayTeam.name : "";
+      const key = `${goal.scorerName}|${teamName}`;
+      const current = scorers.get(key) ?? { player: goal.scorerName, teamName, goals: 0 };
+      current.goals += 1;
+      scorers.set(key, current);
+      previousHome = goal.homeScore;
+      previousAway = goal.awayScore;
+    }
+  }
+
+  return [...scorers.values()].sort((left, right) => right.goals - left.goals || left.player.localeCompare(right.player)).slice(0, 20);
 }
 
 function shortTeam(name: string): string {

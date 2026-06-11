@@ -21,6 +21,7 @@ type MatchRow = {
   extra_away_score: number | null;
   penalty_home_score: number | null;
   penalty_away_score: number | null;
+  goals_json: string | null;
   is_double_points: number;
   home_id: string;
   home_name: string;
@@ -515,6 +516,7 @@ export function rowToMatch(row: MatchRow): Match & { myPrediction?: Prediction |
     extraAwayScore: row.extra_away_score,
     penaltyHomeScore: row.penalty_home_score,
     penaltyAwayScore: row.penalty_away_score,
+    goals: parseGoalsJson(row.goals_json),
     isDoublePoints: row.is_double_points === 1,
     myPrediction: null
   };
@@ -532,4 +534,15 @@ export function rowToMatch(row: MatchRow): Match & { myPrediction?: Prediction |
   }
 
   return match;
+}
+
+function parseGoalsJson(value: string | null): Match["goals"] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as Match["goals"];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((goal) => typeof goal.homeScore === "number" && typeof goal.awayScore === "number");
+  } catch {
+    return [];
+  }
 }
