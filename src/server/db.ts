@@ -1,7 +1,7 @@
 import { scorePrediction, validatePrediction } from "../domain/scoring";
 import { initialMatches, initialTeams, leagueSeed } from "../shared/fixtures";
 import type { BonusPrediction, LeaderboardRow, Match, MatchStatus, Prediction, SquadPlayer, Team } from "../shared/types";
-import { createId, hashPassword } from "./crypto";
+import { createId, hashPassword, verifyPassword } from "./crypto";
 import { HttpError } from "./http";
 import type { Env } from "./types";
 
@@ -247,23 +247,51 @@ export async function getLeagueUsers(env: Env, leagueId = "fortilin"): Promise<A
   displayName: string;
   role: string;
   isAdmin: boolean;
+  bonus: BonusPrediction | null;
 }>> {
   const { results } = await env.DB.prepare(
-    `SELECT u.id, u.username, u.display_name, u.is_admin, lm.role
+    `SELECT u.id, u.username, u.display_name, u.is_admin, lm.role,
+            b.champion_team_id, b.runner_up_team_id, b.top_scorer_team_id, b.top_scorer_player_id,
+            b.top_scorer, b.points AS bonus_points, b.locked_at
      FROM league_members lm
      JOIN users u ON u.id = lm.user_id
+     LEFT JOIN bonus_predictions b ON b.user_id = u.id AND b.league_id = lm.league_id
      WHERE lm.league_id = ?1
      ORDER BY u.display_name COLLATE NOCASE`
   )
     .bind(leagueId)
-    .all<{ id: string; username: string; display_name: string; is_admin: number; role: string }>();
+    .all<{
+      id: string;
+      username: string;
+      display_name: string;
+      is_admin: number;
+      role: string;
+      champion_team_id: string | null;
+      runner_up_team_id: string | null;
+      top_scorer_team_id: string | null;
+      top_scorer_player_id: number | null;
+      top_scorer: string | null;
+      bonus_points: number | null;
+      locked_at: string | null;
+    }>();
 
   return results.map((row) => ({
     id: row.id,
     username: row.username,
     displayName: row.display_name,
     role: row.role,
-    isAdmin: row.is_admin === 1
+    isAdmin: row.is_admin === 1,
+    bonus: row.locked_at
+      ? {
+          championTeamId: row.champion_team_id,
+          runnerUpTeamId: row.runner_up_team_id,
+          topScorerTeamId: row.top_scorer_team_id,
+          topScorerPlayerId: row.top_scorer_player_id,
+          topScorer: row.top_scorer,
+          points: row.bonus_points ?? 0,
+          lockedAt: row.locked_at
+        }
+      : null
   }));
 }
 
@@ -296,6 +324,34 @@ export async function getBonus(env: Env, userId: string): Promise<BonusPredictio
   };
 }
 
+export async function updateUserProfile(env: Env, userId: string, input: { displayName: string }): Promise<void> {
+  const displayName = input.displayName.trim();
+  if (displayName.length < 2) throw new HttpError(400, "El nombre visible debe tener al menos 2 caracteres.");
+  if (displayName.length > 40) throw new HttpError(400, "El nombre visible no puede superar 40 caracteres.");
+
+  await env.DB.prepare("UPDATE users SET display_name = ?1 WHERE id = ?2").bind(displayName, userId).run();
+}
+
+export async function updateUserOwnPassword(env: Env, userId: string, input: {
+  currentPassword: string;
+  newPassword: string;
+}): Promise<void> {
+  if (input.newPassword.length < 6) {
+    throw new HttpError(400, "La nueva contraseña debe tener al menos 6 caracteres.");
+  }
+
+  const row = await env.DB.prepare("SELECT password_hash, password_salt FROM users WHERE id = ?1")
+    .bind(userId)
+    .first<{ password_hash: string; password_salt: string }>();
+  if (!row) throw new HttpError(404, "Usuario no encontrado.");
+  if (!(await verifyPassword(input.currentPassword, row.password_salt, row.password_hash))) {
+    throw new HttpError(401, "La contraseña actual no es correcta.");
+  }
+
+  const { hash, salt } = await hashPassword(input.newPassword);
+  await env.DB.prepare("UPDATE users SET password_hash = ?1, password_salt = ?2 WHERE id = ?3").bind(hash, salt, userId).run();
+}
+
 export async function createBonus(env: Env, userId: string, input: {
   championTeamId: string | null;
   runnerUpTeamId: string | null;
@@ -304,6 +360,34 @@ export async function createBonus(env: Env, userId: string, input: {
 }): Promise<BonusPrediction> {
   const existing = await getBonus(env, userId);
   if (existing) throw new HttpError(409, "Los bonus ya estan bloqueados.");
+  const bonus = await validateBonusInput(env, input);
+
+  const now = new Date().toISOString();
+  await env.DB.prepare(
+    `INSERT INTO bonus_predictions
+     (league_id, user_id, champion_team_id, runner_up_team_id, top_scorer_team_id, top_scorer_player_id, top_scorer, points, locked_at, created_at, updated_at)
+     VALUES ('fortilin', ?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?7, ?7)`
+  )
+    .bind(userId, input.championTeamId, input.runnerUpTeamId, input.topScorerTeamId, input.topScorerPlayerId, bonus.topScorer, now)
+    .run();
+
+  return {
+    championTeamId: input.championTeamId,
+    runnerUpTeamId: input.runnerUpTeamId,
+    topScorerTeamId: input.topScorerTeamId,
+    topScorerPlayerId: input.topScorerPlayerId,
+    topScorer: bonus.topScorer,
+    points: 0,
+    lockedAt: now
+  };
+}
+
+async function validateBonusInput(env: Env, input: {
+  championTeamId: string | null;
+  runnerUpTeamId: string | null;
+  topScorerTeamId: string | null;
+  topScorerPlayerId: number | null;
+}): Promise<{ topScorer: string }> {
   if (input.championTeamId && input.runnerUpTeamId && input.championTeamId === input.runnerUpTeamId) {
     throw new HttpError(400, "El campeón y el subcampeón no pueden ser la misma selección.");
   }
@@ -321,24 +405,41 @@ export async function createBonus(env: Env, userId: string, input: {
     throw new HttpError(400, "Ese jugador no esta cargado como convocado para esa selección.");
   }
 
-  const now = new Date().toISOString();
-  await env.DB.prepare(
-    `INSERT INTO bonus_predictions
-     (league_id, user_id, champion_team_id, runner_up_team_id, top_scorer_team_id, top_scorer_player_id, top_scorer, points, locked_at, created_at, updated_at)
-     VALUES ('fortilin', ?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?7, ?7)`
-  )
-    .bind(userId, input.championTeamId, input.runnerUpTeamId, input.topScorerTeamId, input.topScorerPlayerId, scorer.name, now)
-    .run();
+  return { topScorer: scorer.name };
+}
 
-  return {
-    championTeamId: input.championTeamId,
-    runnerUpTeamId: input.runnerUpTeamId,
-    topScorerTeamId: input.topScorerTeamId,
-    topScorerPlayerId: input.topScorerPlayerId,
-    topScorer: scorer.name,
-    points: 0,
-    lockedAt: now
-  };
+export async function setUserBonusAsAdmin(env: Env, actorUserId: string, userId: string, input: {
+  championTeamId: string | null;
+  runnerUpTeamId: string | null;
+  topScorerTeamId: string | null;
+  topScorerPlayerId: number | null;
+}): Promise<BonusPrediction> {
+  const member = await env.DB.prepare("SELECT user_id FROM league_members WHERE league_id = 'fortilin' AND user_id = ?1")
+    .bind(userId)
+    .first();
+  if (!member) throw new HttpError(404, "Usuario no encontrado en la liga.");
+
+  const bonus = await validateBonusInput(env, input);
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO bonus_predictions
+       (league_id, user_id, champion_team_id, runner_up_team_id, top_scorer_team_id, top_scorer_player_id, top_scorer, points, locked_at, created_at, updated_at)
+       VALUES ('fortilin', ?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?7, ?7)
+       ON CONFLICT(league_id, user_id)
+       DO UPDATE SET champion_team_id = excluded.champion_team_id,
+                     runner_up_team_id = excluded.runner_up_team_id,
+                     top_scorer_team_id = excluded.top_scorer_team_id,
+                     top_scorer_player_id = excluded.top_scorer_player_id,
+                     top_scorer = excluded.top_scorer,
+                     updated_at = excluded.updated_at`
+    ).bind(userId, input.championTeamId, input.runnerUpTeamId, input.topScorerTeamId, input.topScorerPlayerId, bonus.topScorer, now),
+    env.DB.prepare(
+      "INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id, payload, created_at) VALUES (?1, ?2, 'set_user_bonus', 'bonus', ?3, ?4, ?5)"
+    ).bind(createId("aud"), actorUserId, userId, JSON.stringify(input), now)
+  ]);
+
+  return (await getBonus(env, userId))!;
 }
 
 export async function setMatchResult(env: Env, actorUserId: string, input: {

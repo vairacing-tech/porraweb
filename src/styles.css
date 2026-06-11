@@ -54,6 +54,7 @@ button {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scroll-padding-bottom: 150px;
   background: #04170f;
 }
 
@@ -72,7 +73,7 @@ button {
   position: relative;
   z-index: 1;
   min-height: 100vh;
-  padding: max(20px, env(safe-area-inset-top)) 16px 104px;
+  padding: max(20px, env(safe-area-inset-top)) 16px calc(150px + env(safe-area-inset-bottom));
 }
 
 .topbar {
@@ -881,6 +882,8 @@ button {
 }
 
 .admin-card select,
+.admin-card input,
+.profile-form input,
 .auth-form input,
 .auth-form select,
 .admin-score input {
@@ -903,6 +906,12 @@ button {
 .admin-score span {
   font-size: 24px;
   font-weight: 950;
+}
+
+.profile-form {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
 }
 
 .bottom-nav {

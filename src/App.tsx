@@ -14,6 +14,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import {
   clearDemoSession,
+  changePassword,
   fetchBootstrap,
   login,
   logout,
@@ -23,9 +24,11 @@ import {
   setDoublePoints,
   setDemoSession,
   setMatchResult,
+  setUserBonus,
   setUserPrediction,
   syncResults,
   syncSquads,
+  updateProfile,
   type BootstrapData
 } from "./client/api";
 import { isPredictionLocked } from "./domain/scoring";
@@ -433,10 +436,53 @@ function ProfileView({
   onRefresh: () => Promise<void>;
   onNotice: (message: string) => void;
 }) {
+  const [displayName, setDisplayName] = useState(data.user?.displayName ?? "");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newOwnPassword, setNewOwnPassword] = useState("");
+
+  useEffect(() => {
+    setDisplayName(data.user?.displayName ?? "");
+  }, [data.user?.displayName]);
+
   async function handleLogout() {
     if (data.isDemo) clearDemoSession();
     else await logout();
     await onRefresh();
+  }
+
+  async function handleProfileSave(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    try {
+      if (data.isDemo) {
+        setDemoSession({
+          username: data.user?.username || "demo",
+          displayName,
+          isAdmin: data.user?.isAdmin === true
+        });
+      } else {
+        await updateProfile(displayName);
+      }
+      onNotice("Perfil actualizado.");
+      await onRefresh();
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "No se pudo actualizar el perfil.");
+    }
+  }
+
+  async function handleOwnPasswordSave(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (newOwnPassword.length < 6) {
+      onNotice("La contraseña nueva debe tener al menos 6 caracteres.");
+      return;
+    }
+    try {
+      if (!data.isDemo) await changePassword(currentPassword, newOwnPassword);
+      setCurrentPassword("");
+      setNewOwnPassword("");
+      onNotice("Contraseña actualizada.");
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "No se pudo cambiar la contraseña.");
+    }
   }
 
   return (
@@ -451,6 +497,36 @@ function ProfileView({
           <LogOut size={16} /> Salir
         </button>
       </div>
+      <form className="card profile-form" onSubmit={handleProfileSave}>
+        <div className="section-title">
+          <User size={18} />
+          <span>Datos de perfil</span>
+        </div>
+        <label className="select-label">
+          <span>Nombre visible</span>
+          <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
+        </label>
+        <button type="submit" className="save-button wide">Guardar perfil</button>
+      </form>
+      <form className="card profile-form" onSubmit={handleOwnPasswordSave}>
+        <div className="section-title">
+          <Lock size={18} />
+          <span>Cambiar contraseña</span>
+        </div>
+        <input
+          placeholder="Contraseña actual"
+          type="password"
+          value={currentPassword}
+          onChange={(event) => setCurrentPassword(event.target.value)}
+        />
+        <input
+          placeholder="Nueva contraseña"
+          type="password"
+          value={newOwnPassword}
+          onChange={(event) => setNewOwnPassword(event.target.value)}
+        />
+        <button type="submit" className="save-button wide">Cambiar contraseña</button>
+      </form>
       {data.user?.isAdmin ? <AdminPanel data={data} onRefresh={onRefresh} onNotice={onNotice} /> : null}
     </section>
   );
@@ -466,6 +542,39 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
   const [userHome, setUserHome] = useState(0);
   const [userAway, setUserAway] = useState(0);
   const match = data.matches.find((candidate) => candidate.id === matchId);
+  const targetUser = users.find((item) => item.id === targetUserId) ?? null;
+  const defaultChampionId = data.teams[0]?.id ?? null;
+  const defaultRunnerUpId = firstDifferentTeam(data.teams, defaultChampionId)?.id ?? null;
+  const defaultScorerTeamId = firstTeamWithPlayers(data.teams, data.squadPlayers)?.id ?? data.teams[0]?.id ?? null;
+  const defaultScorerPlayerId = firstPlayerForTeam(data.squadPlayers, defaultScorerTeamId)?.apiPlayerId ?? null;
+  const [bonusChampionId, setBonusChampionId] = useState<string | null>(targetUser?.bonus?.championTeamId ?? defaultChampionId);
+  const [bonusRunnerUpId, setBonusRunnerUpId] = useState<string | null>(targetUser?.bonus?.runnerUpTeamId ?? defaultRunnerUpId);
+  const [bonusScorerTeamId, setBonusScorerTeamId] = useState<string | null>(targetUser?.bonus?.topScorerTeamId ?? defaultScorerTeamId);
+  const [bonusScorerPlayerId, setBonusScorerPlayerId] = useState<number | null>(targetUser?.bonus?.topScorerPlayerId ?? defaultScorerPlayerId);
+  const bonusRunnerUpTeams = useMemo(
+    () => data.teams.filter((team) => team.id !== bonusChampionId),
+    [data.teams, bonusChampionId]
+  );
+  const bonusScorerPlayers = useMemo(
+    () => data.squadPlayers.filter((player) => player.teamId === bonusScorerTeamId),
+    [data.squadPlayers, bonusScorerTeamId]
+  );
+
+  useEffect(() => {
+    if (!targetUserId && users[0]) setTargetUserId(users[0].id);
+  }, [targetUserId, users]);
+
+  useEffect(() => {
+    const bonus = targetUser?.bonus;
+    const championId = bonus?.championTeamId ?? defaultChampionId;
+    const runnerUpId = bonus?.runnerUpTeamId ?? firstDifferentTeam(data.teams, championId)?.id ?? defaultRunnerUpId;
+    const scorerTeamId = bonus?.topScorerTeamId ?? defaultScorerTeamId;
+    const scorerPlayerId = bonus?.topScorerPlayerId ?? firstPlayerForTeam(data.squadPlayers, scorerTeamId)?.apiPlayerId ?? defaultScorerPlayerId;
+    setBonusChampionId(championId);
+    setBonusRunnerUpId(runnerUpId);
+    setBonusScorerTeamId(scorerTeamId);
+    setBonusScorerPlayerId(scorerPlayerId);
+  }, [targetUserId, targetUser?.bonus, data.teams, data.squadPlayers, defaultChampionId, defaultRunnerUpId, defaultScorerTeamId, defaultScorerPlayerId]);
 
   async function handleSquadSync() {
     try {
@@ -550,6 +659,35 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
     }
   }
 
+  async function handleUserBonus() {
+    if (!targetUserId) {
+      onNotice("Selecciona un usuario.");
+      return;
+    }
+    if (bonusChampionId && bonusChampionId === bonusRunnerUpId) {
+      onNotice("Campeón y subcampeón no pueden ser la misma selección.");
+      return;
+    }
+    if (!bonusScorerTeamId || !bonusScorerPlayerId) {
+      onNotice("Selecciona la selección y el jugador del máximo goleador.");
+      return;
+    }
+    try {
+      if (!data.isDemo) {
+        await setUserBonus(targetUserId, {
+          championTeamId: bonusChampionId,
+          runnerUpTeamId: bonusRunnerUpId,
+          topScorerTeamId: bonusScorerTeamId,
+          topScorerPlayerId: bonusScorerPlayerId
+        });
+      }
+      onNotice("Bonus del usuario actualizado.");
+      await onRefresh();
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "No se pudo actualizar el bonus.");
+    }
+  }
+
   return (
     <div className="card admin-card">
       <div className="section-title">
@@ -585,9 +723,9 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
       </div>
       <hr />
       <select value={matchId} onChange={(event) => setMatchId(event.target.value)}>
-        {data.matches.slice(0, 20).map((item) => (
+        {data.matches.map((item) => (
           <option key={item.id} value={item.id}>
-            {item.homeTeam.name} vs {item.awayTeam.name}
+            {formatDate(item.kickoffAt)} {formatTime(item.kickoffAt)} · {item.homeTeam.name} vs {item.awayTeam.name}
           </option>
         ))}
       </select>
@@ -610,6 +748,35 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
         <input type="number" min={0} value={userAway} onChange={(event) => setUserAway(Number(event.target.value))} />
       </div>
       <button type="button" className="save-button wide" onClick={handleUserPrediction}>Guardar pronóstico de usuario</button>
+      <hr />
+      <small className="admin-subtitle">Bonus del participante seleccionado</small>
+      <SelectTeam
+        label="Campeón"
+        teams={data.teams}
+        value={bonusChampionId}
+        onChange={(value) => {
+          setBonusChampionId(value);
+          setBonusRunnerUpId((current) => (current === value ? firstDifferentTeam(data.teams, value)?.id ?? null : current));
+        }}
+      />
+      <SelectTeam label="Subcampeón" teams={bonusRunnerUpTeams} value={bonusRunnerUpId} onChange={setBonusRunnerUpId} />
+      <SelectTeam
+        label="Selección del máximo goleador"
+        teams={data.teams}
+        value={bonusScorerTeamId}
+        onChange={(value) => {
+          const player = firstPlayerForTeam(data.squadPlayers, value);
+          setBonusScorerTeamId(value);
+          setBonusScorerPlayerId(player?.apiPlayerId ?? null);
+        }}
+      />
+      <SelectPlayer
+        label="Máximo goleador"
+        players={bonusScorerPlayers}
+        value={bonusScorerPlayerId}
+        onChange={setBonusScorerPlayerId}
+      />
+      <button type="button" className="save-button wide" onClick={handleUserBonus}>Guardar bonus de usuario</button>
     </div>
   );
 }

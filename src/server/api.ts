@@ -12,7 +12,10 @@ import {
   savePrediction,
   setDoublePoints,
   setMatchResult,
-  setUserPredictionAsAdmin
+  setUserBonusAsAdmin,
+  setUserPredictionAsAdmin,
+  updateUserOwnPassword,
+  updateUserProfile
 } from "./db";
 import { HttpError, json, readJson, requireInt, requireString, toErrorResponse } from "./http";
 import { runResultSync, runSquadSync } from "./sync";
@@ -158,6 +161,23 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       return json({ bonus });
     }
 
+    if (segments[0] === "profile" && segments.length === 1 && method === "PUT") {
+      requireUser(user);
+      const body = await readJson<{ displayName?: string }>(request);
+      await updateUserProfile(env, user!.id, { displayName: requireString(body.displayName, "displayName") });
+      return json({ ok: true });
+    }
+
+    if (segments[0] === "profile" && segments[1] === "password" && method === "PUT") {
+      requireUser(user);
+      const body = await readJson<{ currentPassword?: string; newPassword?: string }>(request);
+      await updateUserOwnPassword(env, user!.id, {
+        currentPassword: requireString(body.currentPassword, "currentPassword"),
+        newPassword: requireString(body.newPassword, "newPassword")
+      });
+      return json({ ok: true });
+    }
+
     if (segments[0] === "admin") {
       requireAdmin(user);
 
@@ -169,6 +189,17 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         const body = await readJson<{ newPassword?: string }>(request);
         await resetUserPassword(env, user!.id, segments[2], requireString(body.newPassword, "newPassword"));
         return json({ ok: true });
+      }
+
+      if (segments[1] === "users" && segments[3] === "bonus" && method === "PUT") {
+        const body = await readJson<RegisterBody["bonus"]>(request);
+        const bonus = await setUserBonusAsAdmin(env, user!.id, segments[2], {
+          championTeamId: body?.championTeamId ?? null,
+          runnerUpTeamId: body?.runnerUpTeamId ?? null,
+          topScorerTeamId: body?.topScorerTeamId ?? null,
+          topScorerPlayerId: body?.topScorerPlayerId ?? null
+        });
+        return json({ bonus });
       }
 
       if (segments[1] === "users" && segments[3] === "predictions" && segments[4] && method === "PUT") {

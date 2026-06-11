@@ -101,7 +101,7 @@ export async function fetchOpenLigaDbTeams(env: Env): Promise<OpenLigaDbTeam[]> 
 export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMatch {
   const kickoffAt = normalizeKickoff(match.matchDateTimeUTC || match.matchDateTime);
   const finalResult = selectFinalResult(match.matchResults || []);
-  const status = getStatus(match, kickoffAt);
+  const status = getStatus(match, kickoffAt, finalResult);
 
   return {
     providerMatchId: match.matchID,
@@ -167,12 +167,14 @@ function normalizeKickoff(value: string): string {
   return date.toISOString();
 }
 
-function getStatus(match: OpenLigaDbMatch, kickoffAt: string): MatchStatus {
+function getStatus(match: OpenLigaDbMatch, kickoffAt: string, finalResult: OpenLigaDbResult | null): MatchStatus {
   if (match.matchIsFinished) return "finished";
 
   const kickoffTime = new Date(kickoffAt).getTime();
   const now = Date.now();
-  if (kickoffTime <= now && now - kickoffTime <= 3 * 60 * 60 * 1000) return "live";
+  const elapsed = now - kickoffTime;
+  if (finalResult && elapsed >= 135 * 60 * 1000) return "finished";
+  if (kickoffTime <= now && elapsed <= 135 * 60 * 1000) return "live";
   return "scheduled";
 }
 

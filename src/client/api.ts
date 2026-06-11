@@ -22,6 +22,7 @@ export interface AdminUser {
   displayName: string;
   role: string;
   isAdmin: boolean;
+  bonus: BonusPrediction | null;
 }
 
 export interface RegisterInput {
@@ -62,6 +63,20 @@ export async function logout(): Promise<void> {
   await request("/api/auth/logout", { method: "POST" });
 }
 
+export async function updateProfile(displayName: string): Promise<void> {
+  await request("/api/profile", {
+    method: "PUT",
+    body: JSON.stringify({ displayName })
+  });
+}
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  await request("/api/profile/password", {
+    method: "PUT",
+    body: JSON.stringify({ currentPassword, newPassword })
+  });
+}
+
 export function setDemoSession(input: { username: string; displayName: string; isAdmin: boolean }): void {
   localStorage.setItem("pf_demo_user", JSON.stringify(input));
 }
@@ -88,6 +103,13 @@ export async function setUserPrediction(userId: string, matchId: string, homeSco
   await request(`/api/admin/users/${userId}/predictions/${matchId}`, {
     method: "PUT",
     body: JSON.stringify({ homeScore, awayScore })
+  });
+}
+
+export async function setUserBonus(userId: string, bonus: RegisterInput["bonus"]): Promise<void> {
+  await request(`/api/admin/users/${userId}/bonus`, {
+    method: "PUT",
+    body: JSON.stringify(bonus)
   });
 }
 
