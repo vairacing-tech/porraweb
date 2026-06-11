@@ -39,6 +39,21 @@ describe("OpenLigaDB provider", () => {
     ).toMatchObject({ pointsTeam1: 3, pointsTeam2: 2 });
   });
 
+  it("keeps the published score for unfinished matches", () => {
+    const parsed = parseOpenLigaDbMatch({
+      matchID: 81464,
+      matchDateTime: "2026-06-11T21:00:00",
+      matchDateTimeUTC: "2026-06-11T19:00:00Z",
+      matchIsFinished: false,
+      team1: { teamName: "Mexiko", shortName: "MEX" },
+      team2: { teamName: "Sudafrica", shortName: "RSA" },
+      matchResults: [{ resultTypeID: 2, resultName: "Endergebnis", pointsTeam1: 2, pointsTeam2: 0 }]
+    });
+
+    expect(parsed.homeScore).toBe(2);
+    expect(parsed.awayScore).toBe(0);
+  });
+
   it("returns an empty list when OpenLigaDB is not configured", async () => {
     await expect(fetchOpenLigaDbMatches({} as Env)).resolves.toEqual([]);
   });

@@ -102,8 +102,8 @@ export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMa
     matchday: match.group?.groupOrderID ?? null,
     groupName: match.group?.groupName ?? null,
     status,
-    homeScore: status === "finished" ? finalResult?.pointsTeam1 ?? null : null,
-    awayScore: status === "finished" ? finalResult?.pointsTeam2 ?? null : null
+    homeScore: finalResult?.pointsTeam1 ?? null,
+    awayScore: finalResult?.pointsTeam2 ?? null
   };
 }
 

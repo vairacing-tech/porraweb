@@ -303,7 +303,7 @@ button {
 
 .score-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 46px 10px 46px minmax(0, 1fr);
+  grid-template-columns: minmax(54px, 1fr) 52px 10px 52px minmax(54px, 1fr);
   align-items: center;
   gap: 5px;
 }
@@ -321,6 +321,7 @@ button {
 }
 
 .team-inline strong {
+  min-width: 0;
   overflow: hidden;
   font-size: 12.5px;
   white-space: nowrap;
@@ -416,13 +417,14 @@ button {
 
 .two-column {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 12px;
   margin-bottom: 14px;
 }
 
 .mini-card {
   min-width: 0;
+  overflow: hidden;
   padding: 12px;
 }
 
@@ -497,7 +499,7 @@ button {
 
 .today-row {
   display: grid;
-  grid-template-columns: 28px 1fr auto 1fr 28px;
+  grid-template-columns: 30px minmax(0, 1fr) auto minmax(0, 1fr) 30px;
   align-items: center;
   gap: 5px;
   min-height: 45px;
@@ -507,6 +509,13 @@ button {
   background: white;
   font-size: 11px;
   font-weight: 800;
+}
+
+.today-row span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .today-row .team-badge {
@@ -960,8 +969,13 @@ button {
     font-size: 18px;
   }
 
-  .two-column {
-    grid-template-columns: 1fr;
+  .score-row {
+    grid-template-columns: minmax(44px, 1fr) 48px 10px 48px minmax(44px, 1fr);
+  }
+
+  .score-row .team-badge {
+    width: 26px;
+    height: 26px;
   }
 
   .admin-row.two-actions {

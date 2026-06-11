@@ -87,7 +87,17 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       const bonus = user ? await getBonus(env, user.id) : null;
       const adminUsers = user?.isAdmin ? await getLeagueUsers(env) : undefined;
       const now = new Date().toISOString();
-      const nextMatch = matches.find((match) => new Date(match.kickoffAt).getTime() >= Date.now()) ?? matches.at(-1) ?? null;
+      const nowMs = Date.now();
+      const currentWindowMs = 3 * 60 * 60 * 1000;
+      const currentMatch =
+        matches.find((match) => {
+          const kickoffMs = new Date(match.kickoffAt).getTime();
+          return (
+            match.status === "live" ||
+            (match.status !== "finished" && kickoffMs <= nowMs && nowMs - kickoffMs <= currentWindowMs)
+          );
+        }) ?? null;
+      const nextMatch = currentMatch ?? matches.find((match) => new Date(match.kickoffAt).getTime() >= nowMs) ?? matches.at(-1) ?? null;
       return json({
         appName: env.APP_NAME || "Porra Fortilin",
         league: { id: "fortilin", name: env.LEAGUE_NAME || "Fortilin" },

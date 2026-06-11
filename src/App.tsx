@@ -124,22 +124,25 @@ export function App() {
     return <AuthScreen data={data} onDone={refresh} />;
   }
 
+  const sortedMatches = sortMatchesByKickoff(data.matches);
+  const currentMatch = findCurrentMatch(sortedMatches);
+  const appData = { ...data, matches: sortedMatches };
   const editableNext =
-    data.matches.find((match) => !isPredictionLocked(match.kickoffAt) && match.status !== "finished") ?? data.nextMatch;
-  const nextMatch = data.nextMatch ?? editableNext;
+    sortedMatches.find((match) => !isPredictionLocked(match.kickoffAt) && match.status !== "finished") ?? data.nextMatch;
+  const nextMatch = currentMatch ?? data.nextMatch ?? editableNext;
 
   return (
     <main className="app-shell">
       <div className="stadium-bg" />
       <div className="content">
-        <Header data={data} />
+        <Header data={appData} />
         {notice ? <button className="notice" type="button" onClick={() => setNotice(null)}>{notice}</button> : null}
 
         {tab === "home" ? (
           <HomeView
-            data={data}
+            data={appData}
             nextMatch={nextMatch}
-            editableMatch={editableNext}
+            editableMatch={currentMatch ?? editableNext}
             scores={scores}
             setScores={setScores}
             onSave={handleSave}
@@ -148,11 +151,11 @@ export function App() {
           />
         ) : null}
         {tab === "matches" ? (
-          <MatchesView data={data} scores={scores} setScores={setScores} onSave={handleSave} />
+          <MatchesView data={appData} scores={scores} setScores={setScores} onSave={handleSave} />
         ) : null}
-        {tab === "leaderboard" ? <LeaderboardView data={data} /> : null}
-        {tab === "bonus" ? <BonusView data={data} /> : null}
-        {tab === "profile" ? <ProfileView data={data} onRefresh={refresh} onNotice={setNotice} /> : null}
+        {tab === "leaderboard" ? <LeaderboardView data={appData} /> : null}
+        {tab === "bonus" ? <BonusView data={appData} /> : null}
+        {tab === "profile" ? <ProfileView data={appData} onRefresh={refresh} onNotice={setNotice} /> : null}
       </div>
       <BottomNav active={tab} onChange={setTab} />
     </main>
@@ -198,7 +201,7 @@ function HomeView({
   onOpenMatches: () => void;
   onOpenLeaderboard: () => void;
 }) {
-  const todayMatches = useMemo(() => data.matches.slice(0, 3), [data.matches]);
+  const todayMatches = useMemo(() => getRelevantMatches(data.matches).slice(0, 4), [data.matches]);
 
   return (
     <>
@@ -273,7 +276,9 @@ function PredictionCard({
         <span>Haz tu pronóstico</span>
         {locked ? <em><Lock size={13} /> Bloqueado</em> : <em>Bloqueo 2h antes</em>}
       </div>
-      <p className="muted compact">{match.round} · Grupo {match.groupName} · {formatTime(match.kickoffAt)}</p>
+      <p className="muted compact">
+        {match.round} · Grupo {match.groupName} · {formatDate(match.kickoffAt)} · {formatTime(match.kickoffAt)}
+      </p>
       <div className="score-row">
         <TeamInline team={match.homeTeam} />
         <ScoreStepper value={draft.home} disabled={locked} onDec={() => change("home", -1)} onInc={() => change("home", 1)} />
@@ -775,7 +780,7 @@ function TodayCard({ matches, onOpen }: { matches: Match[]; onOpen: () => void }
             <small>vs</small>
             <span>{shortTeam(match.awayTeam.name)}</span>
             <TeamBadge team={match.awayTeam} />
-            <em>{formatTime(match.kickoffAt)}</em>
+            <em>{formatDate(match.kickoffAt)} · {formatTime(match.kickoffAt)}</em>
           </div>
         ))}
       </div>
@@ -851,6 +856,31 @@ function formatDate(value: string): string {
 
 function formatTime(value: string): string {
   return new Intl.DateTimeFormat("es-ES", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Madrid" }).format(new Date(value));
+}
+
+function sortMatchesByKickoff<T extends { kickoffAt: string }>(matches: T[]): T[] {
+  return [...matches].sort((left, right) => new Date(left.kickoffAt).getTime() - new Date(right.kickoffAt).getTime());
+}
+
+function findCurrentMatch<T extends Match>(matches: T[], now = new Date()): T | null {
+  const nowMs = now.getTime();
+  const currentWindowMs = 3 * 60 * 60 * 1000;
+  return (
+    matches.find((match) => {
+      const kickoffMs = new Date(match.kickoffAt).getTime();
+      return (
+        match.status === "live" ||
+        (match.status !== "finished" && kickoffMs <= nowMs && nowMs - kickoffMs <= currentWindowMs)
+      );
+    }) ?? null
+  );
+}
+
+function getRelevantMatches<T extends Match>(matches: T[]): T[] {
+  const sorted = sortMatchesByKickoff(matches);
+  const current = findCurrentMatch(sorted);
+  if (!current) return sorted;
+  return [current, ...sorted.filter((match) => match.id !== current.id)];
 }
 
 function shortTeam(name: string): string {
