@@ -1,0 +1,14 @@
+name = "porra-fortilin-sync"
+main = "workers/sync.ts"
+compatibility_date = "2026-06-11"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "porra-fortilin"
+database_id = "replace-with-cloudflare-d1-database-id"
+
+[vars]
+API_FOOTBALL_DAILY_BUDGET = "70"
+
+[[triggers.crons]]
+cron = "*/30 * * * *"

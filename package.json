@@ -1,0 +1,35 @@
+{
+  "name": "porra-fortilin",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "cf:dev": "wrangler pages dev dist --d1 DB=porra-fortilin",
+    "cf:migrate:local": "wrangler d1 migrations apply porra-fortilin --local",
+    "cf:migrate:remote": "wrangler d1 migrations apply porra-fortilin --remote",
+    "cf:deploy": "wrangler pages deploy dist --project-name porra-fortilin",
+    "cf:deploy:sync": "wrangler deploy --config wrangler.sync.toml"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.0.4",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260606.0",
+    "@types/node": "^24.0.0",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "playwright": "^1.60.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8",
+    "wrangler": "^4.19.1"
+  }
+}

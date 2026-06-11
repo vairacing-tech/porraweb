@@ -1,0 +1,13 @@
+name = "porra-fortilin"
+compatibility_date = "2026-06-11"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "porra-fortilin"
+database_id = "replace-with-cloudflare-d1-database-id"
+
+[vars]
+APP_NAME = "Porra Fortilin"
+LEAGUE_NAME = "Fortilin"
+API_FOOTBALL_DAILY_BUDGET = "70"
