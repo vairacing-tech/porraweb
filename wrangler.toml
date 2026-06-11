@@ -5,7 +5,7 @@ pages_build_output_dir = "dist"
 [[d1_databases]]
 binding = "DB"
 database_name = "porra-fortilin"
-database_id = "replace-with-cloudflare-d1-database-id"
+database_id = "9b01ada1-d9ce-480e-a223-a3f96b69a3ee"
 
 [vars]
 APP_NAME = "Porra Fortilin"
