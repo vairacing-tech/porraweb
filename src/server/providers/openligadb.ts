@@ -173,8 +173,8 @@ function getStatus(match: OpenLigaDbMatch, kickoffAt: string, finalResult: OpenL
   const kickoffTime = new Date(kickoffAt).getTime();
   const now = Date.now();
   const elapsed = now - kickoffTime;
-  if (finalResult && elapsed >= 135 * 60 * 1000) return "finished";
-  if (kickoffTime <= now && elapsed <= 135 * 60 * 1000) return "live";
+  if (finalResult && elapsed >= 180 * 60 * 1000) return "finished";
+  if (kickoffTime <= now && elapsed <= 180 * 60 * 1000) return "live";
   return "scheduled";
 }
 

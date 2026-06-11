@@ -66,9 +66,9 @@ describe("OpenLigaDB provider", () => {
     expect(parsed.awayScore).toBe(0);
   });
 
-  it("marks unfinished matches as finished when final result is published after normal match duration", () => {
+  it("marks unfinished matches as finished when final result is published after extended match duration", () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-06-11T21:20:00.000Z"));
+    vi.setSystemTime(new Date("2026-06-11T22:10:00.000Z"));
 
     const parsed = parseOpenLigaDbMatch({
       matchID: 81464,
