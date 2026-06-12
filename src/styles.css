@@ -1042,6 +1042,11 @@ button {
 
 .world-head span:nth-child(2) {
   grid-column: 2 / 4;
+  padding-left: 36px;
+}
+
+.world-head span:nth-child(n + 3) {
+  text-align: right;
 }
 
 .world-row {
