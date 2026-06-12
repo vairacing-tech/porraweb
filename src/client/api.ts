@@ -1,4 +1,4 @@
-import type { BonusPrediction, LeaderboardRow, Match, Prediction, SquadPlayer, Team, WorldStanding } from "../shared/types";
+import type { BonusPrediction, LeaderboardRow, Match, Prediction, SquadPlayer, Team, UserAchievement, WorldStanding } from "../shared/types";
 
 export interface BootstrapData {
   appName: string;
@@ -11,6 +11,7 @@ export interface BootstrapData {
   nextMatch: (Match & { myPrediction?: { id: string; homeScore: number; awayScore: number; points: number; outcome: string } | null }) | null;
   leaderboard: LeaderboardRow[];
   bonus: BonusPrediction | null;
+  achievements: UserAchievement[];
   adminUsers?: AdminUser[];
   adminPredictions?: Prediction[];
   now: string;
@@ -36,6 +37,7 @@ export interface VisiblePrediction {
 export interface UserClosedSummary {
   user: { id: string; username: string; displayName: string };
   bonus: BonusPrediction | null;
+  achievements: UserAchievement[];
   predictions: Array<Prediction & { kickoffAt: string }>;
 }
 
@@ -158,14 +160,19 @@ export async function setDoublePoints(matchId: string, isDoublePoints: boolean):
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(path, {
-    credentials: "include",
-    headers: {
-      "content-type": "application/json",
-      ...(init.headers || {})
-    },
-    ...init
-  });
+  let response: Response;
+  try {
+    response = await fetch(path, {
+      credentials: "include",
+      headers: {
+        "content-type": "application/json",
+        ...(init.headers || {})
+      },
+      ...init
+    });
+  } catch {
+    throw new Error("No se pudo conectar con la API. Reintenta en unos segundos.");
+  }
 
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {

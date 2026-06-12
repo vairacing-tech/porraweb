@@ -35,6 +35,7 @@ export type OpenLigaDbMatch = {
     scoreTeam2: number;
     matchMinute?: number | null;
     goalGetterID?: number | null;
+    goalGetterId?: number | null;
     goalGetterName?: string | null;
     isPenalty?: boolean;
     isOwnGoal?: boolean;
@@ -47,7 +48,8 @@ export type OpenLigaDbMatch = {
 };
 
 export type OpenLigaDbGoalGetter = {
-  goalGetterId: number;
+  goalGetterId?: number;
+  goalGetterID?: number;
   goalGetterName: string;
   goalCount: number;
 };
@@ -156,7 +158,10 @@ export async function fetchOpenLigaDbStandings(env: Env): Promise<OpenLigaDbStan
 
 export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMatch {
   const kickoffAt = normalizeKickoff(match.matchDateTimeUTC || match.matchDateTime);
+  const goals = parseGoals(match.goals || []);
   const finalResult = selectFinalResult(match.matchResults || []);
+  const fallbackScore = getLatestGoalScore(goals);
+  const visibleScore = selectVisibleScore(match, finalResult, fallbackScore);
   const status = getStatus(match, kickoffAt, finalResult);
 
   return {
@@ -169,9 +174,9 @@ export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMa
     matchday: match.group?.groupOrderID ?? null,
     groupName: match.group?.groupName ?? null,
     status,
-    homeScore: finalResult?.pointsTeam1 ?? null,
-    awayScore: finalResult?.pointsTeam2 ?? null,
-    goals: parseGoals(match.goals || [])
+    homeScore: visibleScore?.homeScore ?? null,
+    awayScore: visibleScore?.awayScore ?? null,
+    goals
   };
 }
 
@@ -209,14 +214,43 @@ function parseGoals(goals: NonNullable<OpenLigaDbMatch["goals"]>): MatchGoal[] {
 function enrichGoalGetterNames(matches: OpenLigaDbMatch[], goalGetters: OpenLigaDbGoalGetter[]): OpenLigaDbMatch[] {
   if (goalGetters.length === 0) return matches;
 
-  const byId = new Map(goalGetters.map((goalGetter) => [goalGetter.goalGetterId, goalGetter.goalGetterName]));
+  const byId = new Map<number, string>();
+  for (const goalGetter of goalGetters) {
+    const id = getGoalGetterId(goalGetter);
+    if (id !== null) byId.set(id, goalGetter.goalGetterName);
+  }
   return matches.map((match) => ({
     ...match,
     goals: match.goals?.map((goal) => ({
       ...goal,
-      goalGetterName: goal.goalGetterName?.trim() || (goal.goalGetterID ? byId.get(goal.goalGetterID) ?? "" : "")
+      goalGetterName: goal.goalGetterName?.trim() || resolveGoalGetterName(goal, byId)
     }))
   }));
+}
+
+function getLatestGoalScore(goals: MatchGoal[]): Pick<MatchGoal, "homeScore" | "awayScore"> | null {
+  if (goals.length === 0) return null;
+  return goals[goals.length - 1] ?? null;
+}
+
+function selectVisibleScore(
+  match: OpenLigaDbMatch,
+  finalResult: OpenLigaDbResult | null,
+  fallbackScore: Pick<MatchGoal, "homeScore" | "awayScore"> | null
+): Pick<MatchGoal, "homeScore" | "awayScore"> | null {
+  if (!match.matchIsFinished && fallbackScore) return fallbackScore;
+  if (finalResult) return { homeScore: finalResult.pointsTeam1, awayScore: finalResult.pointsTeam2 };
+  return fallbackScore;
+}
+
+function resolveGoalGetterName(goal: NonNullable<OpenLigaDbMatch["goals"]>[number], byId: Map<number, string>): string {
+  const id = getGoalGetterId(goal);
+  return id === null ? "" : byId.get(id) ?? "";
+}
+
+function getGoalGetterId(value: { goalGetterID?: number | null; goalGetterId?: number | null }): number | null {
+  const id = value.goalGetterID ?? value.goalGetterId ?? null;
+  return Number.isFinite(id) ? Number(id) : null;
 }
 
 export function selectFinalResult(results: OpenLigaDbResult[]): OpenLigaDbResult | null {

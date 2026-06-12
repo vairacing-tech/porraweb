@@ -5,6 +5,7 @@ import type { Env } from "../src/server/types";
 describe("OpenLigaDB provider", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("parses match data into the internal shape", () => {
@@ -96,6 +97,71 @@ describe("OpenLigaDB provider", () => {
 
     expect(parsed.homeScore).toBe(2);
     expect(parsed.awayScore).toBe(0);
+  });
+
+  it("uses the latest goal score when OpenLigaDB has goals but no match result", () => {
+    const parsed = parseOpenLigaDbMatch({
+      matchID: 81465,
+      matchDateTime: "2026-06-12T21:00:00",
+      matchDateTimeUTC: "2026-06-12T19:00:00Z",
+      matchIsFinished: false,
+      team1: { teamName: "Kanada", shortName: "CAN" },
+      team2: { teamName: "Bosnien und Herzegowina", shortName: "BIH" },
+      group: { groupName: "1. Runde", groupOrderID: 1 },
+      matchResults: [],
+      goals: [{ scoreTeam1: 0, scoreTeam2: 1, matchMinute: 18, goalGetterName: "Jugador Bosnia" }]
+    });
+
+    expect(parsed.homeScore).toBe(0);
+    expect(parsed.awayScore).toBe(1);
+    expect(parsed.goals[0]?.scorerName).toBe("Jugador Bosnia");
+  });
+
+  it("prefers the latest goal score over a stale match result while the match is live", () => {
+    const parsed = parseOpenLigaDbMatch({
+      matchID: 81466,
+      matchDateTime: "2026-06-12T21:00:00",
+      matchDateTimeUTC: "2026-06-12T19:00:00Z",
+      matchIsFinished: false,
+      team1: { teamName: "Kanada", shortName: "CAN" },
+      team2: { teamName: "Bosnien und Herzegowina", shortName: "BIH" },
+      group: { groupName: "1. Runde", groupOrderID: 1 },
+      matchResults: [{ resultTypeID: 2, resultName: "Endergebnis", pointsTeam1: 0, pointsTeam2: 0 }],
+      goals: [{ scoreTeam1: 0, scoreTeam2: 1, matchMinute: 11, goalGetterName: "Alistair Johnston" }]
+    });
+
+    expect(parsed.homeScore).toBe(0);
+    expect(parsed.awayScore).toBe(1);
+    expect(parsed.goals[0]?.scorerName).toBe("Alistair Johnston");
+  });
+
+  it("fills missing goal scorer names from OpenLigaDB goal getters", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("getgoalgetters")) {
+        return Response.json([{ goalGetterID: 77, goalGetterName: "Jugador Bosnia", goalCount: 1 }]);
+      }
+
+      return Response.json([
+        {
+          matchID: 81465,
+          matchDateTime: "2026-06-12T21:00:00",
+          matchDateTimeUTC: "2026-06-12T19:00:00Z",
+          matchIsFinished: false,
+          team1: { teamName: "Kanada", shortName: "CAN" },
+          team2: { teamName: "Bosnien und Herzegowina", shortName: "BIH" },
+          goals: [{ scoreTeam1: 0, scoreTeam2: 1, matchMinute: 18, goalGetterID: 77, goalGetterName: "" }]
+        }
+      ]);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const matches = await fetchOpenLigaDbMatches({
+      OPENLIGADB_BASE_URL: "https://api.openligadb.test",
+      OPENLIGADB_LEAGUE_SHORTCUT: "wm26",
+      OPENLIGADB_SEASON: "2026"
+    } as Env);
+
+    expect(matches[0]?.goals?.[0]?.goalGetterName).toBe("Jugador Bosnia");
   });
 
   it("keeps unfinished group matches live inside the extended group-stage fallback window", () => {

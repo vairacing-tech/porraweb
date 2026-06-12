@@ -1,4 +1,5 @@
 import { clearSessionCookie, createSession, getAuthUser, loginUser, sessionCookie } from "./auth";
+import { safeEvaluateAchievements, safeGetUserAchievements } from "./achievements";
 import {
   createBonus,
   deleteUserAsAdmin,
@@ -71,12 +72,14 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
 
     if (segments[0] === "bootstrap" && method === "GET") {
+      if (user) await safeEvaluateAchievements(env);
       const matches = await getMatches(env, user?.id);
       const leaderboard = await getLeaderboard(env);
       const teams = await getTeams(env);
       const squadPlayers = await getSquadPlayers(env);
       const worldStandings = await getWorldStandings(env);
       const bonus = user ? await getBonus(env, user.id) : null;
+      const achievements = user ? await safeGetUserAchievements(env, user.id) : [];
       const adminUsers = user?.isAdmin ? await getLeagueUsers(env) : undefined;
       const adminPredictions = user?.isAdmin ? await getLeaguePredictions(env) : undefined;
       const now = new Date().toISOString();
@@ -102,6 +105,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         nextMatch,
         leaderboard,
         bonus,
+        achievements,
         adminUsers,
         adminPredictions,
         now
@@ -110,7 +114,10 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
     if (segments[0] === "users" && segments[2] === "summary" && method === "GET") {
       requireUser(user);
-      return json(await getUserClosedSummary(env, segments[1]));
+      await safeEvaluateAchievements(env);
+      const summary = await getUserClosedSummary(env, segments[1]);
+      const achievements = await safeGetUserAchievements(env, segments[1]);
+      return json({ ...summary, achievements });
     }
 
     if (segments[0] === "matches" && method === "GET" && segments.length === 1) {
@@ -134,6 +141,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         requireInt(body.homeScore, "homeScore"),
         requireInt(body.awayScore, "awayScore")
       );
+      await safeEvaluateAchievements(env);
       return json({ prediction });
     }
 
@@ -155,6 +163,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         topScorerTeamId: body?.topScorerTeamId ?? null,
         topScorerPlayerId: body?.topScorerPlayerId ?? null
       });
+      await safeEvaluateAchievements(env);
       return json({ bonus });
     }
 
@@ -208,6 +217,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
           topScorerTeamId: body?.topScorerTeamId ?? null,
           topScorerPlayerId: body?.topScorerPlayerId ?? null
         });
+        await safeEvaluateAchievements(env);
         return json({ bonus });
       }
 
@@ -219,6 +229,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
           homeScore: requireInt(body.homeScore, "homeScore"),
           awayScore: requireInt(body.awayScore, "awayScore")
         });
+        await safeEvaluateAchievements(env);
         return json({ prediction });
       }
 
@@ -230,17 +241,20 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
           awayScore: requireInt(body.awayScore, "awayScore"),
           status: body.status === "live" || body.status === "scheduled" ? body.status : "finished"
         });
+        await safeEvaluateAchievements(env);
         return json({ ok: true });
       }
 
       if (segments[1] === "matches" && segments[3] === "double-points" && method === "PUT") {
         const body = await readJson<{ isDoublePoints?: boolean }>(request);
         await setDoublePoints(env, user!.id, segments[2], body.isDoublePoints === true);
+        await safeEvaluateAchievements(env);
         return json({ ok: true });
       }
 
       if (segments[1] === "sync-results" && method === "POST") {
         const result = await runResultSync(env);
+        await safeEvaluateAchievements(env);
         return json(result);
       }
 

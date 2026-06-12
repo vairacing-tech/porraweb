@@ -4,6 +4,35 @@ export type MatchStatus = "scheduled" | "locked" | "live" | "finished" | "postpo
 
 export type PredictionOutcome = "pending" | "exact" | "trend" | "miss";
 
+export type AchievementId =
+  | "visionario_desastre"
+  | "nostradamus_aliexpress"
+  | "analista_de_bar"
+  | "cementerio_de_puntos"
+  | "antipatriota_estadistico"
+  | "arquitecto_del_cero_cero"
+  | "funcionario_del_empate"
+  | "el_var_te_odia"
+  | "mano_rota"
+  | "doble_o_nada_pero_nada"
+  | "ultima_hora_fc"
+  | "boton_de_guardar_desconocido"
+  | "rey_del_barro"
+  | "dictador_de_la_tabla"
+  | "campeon_con_asterisco"
+  | "zurullo_de_oro";
+
+export interface AchievementDefinition {
+  id: AchievementId;
+  name: string;
+  description: string;
+}
+
+export interface UserAchievement extends AchievementDefinition {
+  unlockedAt: string;
+  metadata: Record<string, unknown>;
+}
+
 export interface Team {
   id: string;
   name: string;

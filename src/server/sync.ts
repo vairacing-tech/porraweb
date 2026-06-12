@@ -1,5 +1,6 @@
 import { createId } from "./crypto";
 import { ensureSeeded, recalculateMatch } from "./db";
+import { safeEvaluateAchievements } from "./achievements";
 import {
   fetchOpenLigaDbMatches,
   fetchOpenLigaDbStandings,
@@ -173,6 +174,7 @@ async function runOpenLigaDbResultSync(env: Env): Promise<{ ok: boolean; request
 
     const parsedMatches = matches.map(parseOpenLigaDbMatch);
     const { linked, updated } = await applyOpenLigaDbMatches(env, parsedMatches, targets);
+    if (updated > 0) await safeEvaluateAchievements(env);
     const message = `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado, clasificación mundial ${standingsUpdated} equipos.`;
     await logSync(env, "ok", 0, message, "openligadb");
     return { ok: true, requestsUsed: 0, message };

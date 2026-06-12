@@ -425,7 +425,8 @@ export async function getUserClosedSummary(env: Env, targetUserId: string, leagu
      FROM predictions p
      JOIN matches m ON m.id = p.match_id
      WHERE p.league_id = ?1 AND p.user_id = ?2 AND m.lock_at <= ?3
-     ORDER BY m.kickoff_at ASC`
+     ORDER BY m.kickoff_at DESC
+     LIMIT 3`
   )
     .bind(leagueId, targetUserId, now)
     .all<{

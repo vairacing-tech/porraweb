@@ -1,5 +1,6 @@
 import {
   AlertTriangle,
+  Award,
   CalendarDays,
   Clock,
   Gift,
@@ -8,6 +9,7 @@ import {
   Lock,
   LogOut,
   Medal,
+  NotebookPen,
   Save,
   Shield,
   Table2,
@@ -38,8 +40,10 @@ import {
   type UserClosedSummary,
   type VisiblePrediction
 } from "./client/api";
+import { getPostMatchPhrase, getPreviewPhrase } from "./domain/fortilinCopy";
 import { isPredictionLocked } from "./domain/scoring";
-import type { Match, SquadPlayer, Team } from "./shared/types";
+import { achievementDefinitions } from "./shared/achievements";
+import type { Match, PredictionOutcome, SquadPlayer, Team, UserAchievement } from "./shared/types";
 
 type Tab = "home" | "matches" | "leaderboard" | "world" | "bonus" | "profile";
 
@@ -66,6 +70,7 @@ export function App() {
   const [pullDistance, setPullDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+  const [phraseSessionSeed] = useState(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`);
 
   useEffect(() => {
     void refresh();
@@ -221,6 +226,7 @@ export function App() {
             onOpenMatches={() => setTab("matches")}
             onOpenLeaderboard={() => setTab("leaderboard")}
             onSelectUser={setSelectedUserId}
+            phraseSessionSeed={phraseSessionSeed}
           />
         ) : null}
         {tab === "matches" ? (
@@ -273,7 +279,8 @@ function HomeView({
   refreshKey,
   onOpenMatches,
   onOpenLeaderboard,
-  onSelectUser
+  onSelectUser,
+  phraseSessionSeed
 }: {
   data: BootstrapData;
   nextMatch: Match | null;
@@ -285,16 +292,22 @@ function HomeView({
   onOpenMatches: () => void;
   onOpenLeaderboard: () => void;
   onSelectUser: (userId: string) => void;
+  phraseSessionSeed: string;
 }) {
   const todayMatches = useMemo(() => getRelevantMatches(data.matches).slice(0, 4), [data.matches]);
   const missingUpcoming = useMemo(() => getMissingUpcomingPredictions(data.matches), [data.matches]);
 
   return (
     <>
-      {nextMatch ? <NextMatchHero match={nextMatch} /> : null}
+      {nextMatch ? (
+        <>
+          <NextMatchHero match={nextMatch} />
+          <PreviewPhrase match={nextMatch} userId={data.user?.id ?? "anon"} sessionSeed={phraseSessionSeed} />
+        </>
+      ) : null}
       {missingUpcoming.length > 0 ? <UpcomingPredictionAlert matches={missingUpcoming} onOpen={onOpenMatches} /> : null}
       {editableMatch ? (
-        <PredictionCard match={editableMatch} scores={scores} setScores={setScores} onSave={onSave} refreshKey={refreshKey} featured />
+        <PredictionCard match={editableMatch} scores={scores} setScores={setScores} onSave={onSave} refreshKey={refreshKey} userId={data.user?.id ?? ""} featured />
       ) : null}
       <section className="two-column">
         <LeaderboardCard rows={data.leaderboard.slice(0, 6)} onOpen={onOpenLeaderboard} onSelect={onSelectUser} />
@@ -305,6 +318,7 @@ function HomeView({
 }
 
 function NextMatchHero({ match }: { match: Match }) {
+  const score = getVisibleMatchScore(match);
   return (
     <section className="next-hero">
       <div className={`hero-pill ${match.status === "live" ? "live" : ""}`}>{matchStatusLabel(match)}</div>
@@ -318,7 +332,7 @@ function NextMatchHero({ match }: { match: Match }) {
         </div>
         <TeamBadge team={match.awayTeam} large />
       </div>
-      {hasScore(match) ? <div className="hero-score">{match.homeScore} - {match.awayScore}</div> : null}
+      {score ? <div className="hero-score">{score.home} - {score.away}</div> : null}
       <MatchGoals match={match} compact />
       <div className="hero-meta">
         <span><CalendarDays size={15} /> {formatDate(match.kickoffAt)}</span>
@@ -327,6 +341,16 @@ function NextMatchHero({ match }: { match: Match }) {
       <LockCountdown match={match} />
       <a className="hero-cta" href="#pronostico">Haz tu pronóstico</a>
     </section>
+  );
+}
+
+function PreviewPhrase({ match, userId, sessionSeed }: { match: Match; userId: string; sessionSeed: string }) {
+  const phrase = useMemo(() => getPreviewPhrase(`${match.id}:${userId}:${sessionSeed}`), [match.id, userId, sessionSeed]);
+  return (
+    <div className="preview-phrase">
+      <NotebookPen size={17} />
+      <span>{phrase}</span>
+    </div>
   );
 }
 
@@ -367,6 +391,7 @@ function PredictionCard({
   setScores,
   onSave,
   refreshKey,
+  userId,
   featured = false
 }: {
   match: Match;
@@ -374,11 +399,14 @@ function PredictionCard({
   setScores: (setter: (current: ScoreDraft) => ScoreDraft) => void;
   onSave: (match: Match) => void;
   refreshKey: string;
+  userId: string;
   featured?: boolean;
 }) {
   const locked = isPredictionLocked(match.kickoffAt) || match.status === "finished";
   const draft = scores[match.id] ?? { home: 0, away: 0 };
   const savedPrediction = getMyPrediction(match);
+  const postMatchPhrase = getOwnPostMatchPhrase(match, savedPrediction, userId);
+  const score = getVisibleMatchScore(match);
 
   function change(side: "home" | "away", delta: number) {
     setScores((current) => {
@@ -413,9 +441,10 @@ function PredictionCard({
         <ScoreStepper value={draft.away} disabled={locked} onDec={() => change("away", -1)} onInc={() => change("away", 1)} />
         <TeamInline team={match.awayTeam} align="right" />
       </div>
-      {hasScore(match) ? (
-        <p className="live-score-line">{matchStatusLabel(match)} · Resultado actual: {match.homeScore} - {match.awayScore}</p>
+      {score ? (
+        <p className="live-score-line">{matchStatusLabel(match)} · Resultado actual: {score.home} - {score.away}</p>
       ) : null}
+      {postMatchPhrase ? <PostMatchPhrase outcome={savedPrediction?.outcome ?? "pending"} phrase={postMatchPhrase} /> : null}
       <MatchGoals match={match} />
       <VisiblePredictions match={match} refreshKey={refreshKey} />
       <div className="card-actions">
@@ -447,6 +476,15 @@ function MatchGoals({ match, compact = false }: { match: Match; compact?: boolea
           {formatGoal(goal)} · {goal.homeScore}-{goal.awayScore}
         </span>
       ))}
+    </div>
+  );
+}
+
+function PostMatchPhrase({ outcome, phrase }: { outcome: string; phrase: string }) {
+  return (
+    <div className={`post-match-phrase ${outcome}`}>
+      <NotebookPen size={16} />
+      <span>{phrase}</span>
     </div>
   );
 }
@@ -542,7 +580,7 @@ function MatchesView({
         ))}
       </div>
       {matches.map((match) => (
-        <PredictionCard key={match.id} match={match} scores={scores} setScores={setScores} onSave={onSave} refreshKey={refreshKey} />
+        <PredictionCard key={match.id} match={match} scores={scores} setScores={setScores} onSave={onSave} refreshKey={refreshKey} userId={data.user?.id ?? ""} />
       ))}
     </section>
   );
@@ -703,6 +741,7 @@ function UserSummaryModal({ userId, data, onClose }: { userId: string; data: Boo
 
   const bonus = summary?.bonus ?? null;
   const scorerTeam = bonus?.topScorerTeamId ? teamById.get(bonus.topScorerTeamId)?.name : null;
+  const recentPredictions = summary?.predictions.slice(0, 3) ?? [];
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true">
@@ -710,7 +749,8 @@ function UserSummaryModal({ userId, data, onClose }: { userId: string; data: Boo
         <div className="modal-head">
           <div>
             <strong>{summary?.user.displayName ?? "Participante"}</strong>
-            <span>Pronósticos cerrados y bonus</span>
+            <span>Logros, bonus y últimos pronósticos</span>
+            {data.user?.isAdmin && summary ? <small className="modal-login">Login: {summary.user.username}</small> : null}
           </div>
           <button type="button" onClick={onClose} aria-label="Cerrar"><X size={20} /></button>
         </div>
@@ -718,7 +758,8 @@ function UserSummaryModal({ userId, data, onClose }: { userId: string; data: Boo
         {!summary && !error ? <p className="empty-state">Cargando participante...</p> : null}
         {summary ? (
           <>
-            <div className="summary-block">
+            <AchievementList achievements={summary.achievements ?? []} compact />
+            <div className="summary-block compact-bonus-block">
               <h3>Bonus</h3>
               <BonusLine label="Campeón" value={bonus?.championTeamId ? teamById.get(bonus.championTeamId)?.name : null} />
               <BonusLine label="Subcampeón" value={bonus?.runnerUpTeamId ? teamById.get(bonus.runnerUpTeamId)?.name : null} />
@@ -726,10 +767,10 @@ function UserSummaryModal({ userId, data, onClose }: { userId: string; data: Boo
               <BonusLine label="Puntos bonus" value={bonus ? `${bonus.points}` : "0"} />
             </div>
             <div className="summary-block">
-              <h3>Pronósticos cerrados</h3>
-              {summary.predictions.length === 0 ? <p className="empty-state">Aún no hay pronósticos cerrados visibles.</p> : null}
+              <h3>Últimos 3 pronósticos cerrados</h3>
+              {recentPredictions.length === 0 ? <p className="empty-state">Aún no hay pronósticos cerrados visibles.</p> : null}
               <div className="summary-predictions">
-                {summary.predictions.map((prediction) => {
+                {recentPredictions.map((prediction) => {
                   const match = matchById.get(prediction.matchId);
                   return (
                     <div className="summary-prediction-row" key={prediction.id}>
@@ -748,6 +789,34 @@ function UserSummaryModal({ userId, data, onClose }: { userId: string; data: Boo
   );
 }
 
+function AchievementList({ achievements, compact = false }: { achievements: UserAchievement[]; compact?: boolean }) {
+  return (
+    <div className={`${compact ? "summary-block" : "card"} achievements-card ${compact ? "compact-achievements" : ""}`}>
+      <div className="section-title">
+        <Award size={18} />
+        <span>Logros</span>
+      </div>
+      {achievements.length === 0 ? <p className="empty-state">Aún no hay logros desbloqueados.</p> : null}
+      <div className="achievement-list">
+        {achievements.map((achievement) => (
+          <article className="achievement-card" key={achievement.id}>
+            <div className="achievement-mark">
+              <Award size={22} />
+            </div>
+            <div>
+              <strong>{achievement.name}</strong>
+              <p>{achievement.description}</p>
+              <small>
+                {achievement.metadata?.preview === true ? "Vista previa admin" : `Desbloqueado el ${formatDate(achievement.unlockedAt)}`}
+              </small>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function ProfileView({
   data,
   onRefresh,
@@ -761,6 +830,13 @@ function ProfileView({
   const [currentPassword, setCurrentPassword] = useState("");
   const [newOwnPassword, setNewOwnPassword] = useState("");
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const profileAchievements: UserAchievement[] = data.user?.isAdmin
+    ? achievementDefinitions.map((achievement) => ({
+        ...achievement,
+        unlockedAt: data.now,
+        metadata: { preview: true }
+      }))
+    : data.achievements ?? [];
 
   useEffect(() => {
     setDisplayName(data.user?.displayName ?? "");
@@ -859,6 +935,7 @@ function ProfileView({
         ) : null}
         <button type="submit" className="save-button wide">Guardar perfil</button>
       </form>
+      <AchievementList achievements={profileAchievements} />
       <form className="card profile-form" onSubmit={handleOwnPasswordSave}>
         <div className="section-title">
           <Lock size={18} />
@@ -1117,6 +1194,11 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
             ))}
           </select>
         </label>
+        {targetUser ? (
+          <small className="admin-user-login">
+            Usuario login: <strong>{targetUser.username}</strong>
+          </small>
+        ) : null}
         <div className="admin-row">
           <input
             placeholder="Nueva contraseña"
@@ -1447,8 +1529,25 @@ function getMyPrediction(match: Match): MyPrediction | null {
   return (match as Match & { myPrediction?: MyPrediction | null }).myPrediction ?? null;
 }
 
-function hasScore(match: Match): boolean {
-  return match.homeScore !== null && match.homeScore !== undefined && match.awayScore !== null && match.awayScore !== undefined;
+function getOwnPostMatchPhrase(match: Match, prediction: MyPrediction | null, userId: string): string | null {
+  if (!prediction || match.status !== "finished") return null;
+  const outcome = prediction.outcome as PredictionOutcome;
+  return getPostMatchPhrase(outcome, `${userId}:${match.id}:${outcome}`);
+}
+
+function getVisibleMatchScore(match: Match): { home: number; away: number } | null {
+  const latestGoalScore = getLatestGoalScore(match);
+  if (match.status === "live" && latestGoalScore) return latestGoalScore;
+  if (match.homeScore !== null && match.homeScore !== undefined && match.awayScore !== null && match.awayScore !== undefined) {
+    return { home: match.homeScore, away: match.awayScore };
+  }
+  return latestGoalScore;
+}
+
+function getLatestGoalScore(match: Match): { home: number; away: number } | null {
+  const goals = match.goals || [];
+  const lastGoal = goals[goals.length - 1];
+  return lastGoal ? { home: lastGoal.homeScore, away: lastGoal.awayScore } : null;
 }
 
 function matchStatusLabel(match: Match): string {
@@ -1459,7 +1558,8 @@ function matchStatusLabel(match: Match): string {
 }
 
 function matchSummary(match: Match): string {
-  const score = hasScore(match) ? `${match.homeScore}-${match.awayScore}` : null;
+  const visibleScore = getVisibleMatchScore(match);
+  const score = visibleScore ? `${visibleScore.home}-${visibleScore.away}` : null;
   const status = match.status === "live" || match.status === "finished" ? matchStatusLabel(match) : null;
   const double = match.isDoublePoints ? "x2" : null;
   return [status, score, double].filter(Boolean).join(" · ") || "Programado";
