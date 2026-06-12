@@ -1,7 +1,7 @@
 import { recalculateMatch } from "./db";
 import { ensureSeeded } from "./db";
 import { createId } from "./crypto";
-import { fetchOpenLigaDbMatches, fetchOpenLigaDbTeams, parseOpenLigaDbMatch, type ParsedOpenLigaDbMatch } from "./providers/openligadb";
+import { fetchOpenLigaDbMatches, fetchOpenLigaDbTeams, normalizeLogoUrl, parseOpenLigaDbMatch, type ParsedOpenLigaDbMatch } from "./providers/openligadb";
 import type { Env } from "./types";
 
 type ApiFootballFixture = {
@@ -351,7 +351,7 @@ async function applyOpenLigaDbTeams(env: Env, teams: Array<{ teamName: string; t
     const localTeamId = resolveProviderTeamId(team.teamName);
     if (!localTeamId) continue;
     const result = await env.DB.prepare("UPDATE teams SET logo_url = COALESCE(?1, logo_url) WHERE id = ?2")
-      .bind(team.teamIconUrl ?? null, localTeamId)
+      .bind(normalizeLogoUrl(team.teamIconUrl), localTeamId)
       .run();
     updated += result.meta.changes ?? 0;
   }

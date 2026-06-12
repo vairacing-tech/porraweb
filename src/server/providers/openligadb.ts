@@ -179,8 +179,13 @@ function parseTeam(team: OpenLigaDbTeam): Team {
     id: teamId(team.teamName),
     name: team.teamName,
     shortCode: team.shortName || team.teamName.slice(0, 3).toUpperCase(),
-    logoUrl: team.teamIconUrl || null
+    logoUrl: normalizeLogoUrl(team.teamIconUrl)
   };
+}
+
+export function normalizeLogoUrl(value?: string | null): string | null {
+  if (!value) return null;
+  return value.replace(/^http:\/\//i, "https://");
 }
 
 function normalizeKickoff(value: string): string {
