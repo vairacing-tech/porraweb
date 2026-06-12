@@ -1371,7 +1371,7 @@ function TodayCard({ matches, onOpen }: { matches: Match[]; onOpen: () => void }
     <section className="card mini-card">
       <div className="section-title">
         <CalendarDays size={18} />
-        <span>Partidos</span>
+        <span>Próximos partidos</span>
       </div>
       <div className="today-list">
         {matches.map((match) => (
