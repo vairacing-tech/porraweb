@@ -23,7 +23,7 @@ El maximo goleador se elige en dos pasos: seleccion y jugador convocado. Si una 
 Desde `Perfil -> Admin`, el admin puede:
 
 - Cargar convocatorias desde la tabla local `squad_players`.
-- Sincronizar resultados con OpenLigaDB y usar API-Football solo como fallback opcional.
+- Sincronizar resultados con OpenLigaDB.
 - Resetear contrasenas de participantes.
 - Modificar resultados reales.
 - Marcar o quitar puntos dobles.
@@ -38,8 +38,6 @@ El proveedor principal de calendario/resultados es OpenLigaDB:
 - `OPENLIGADB_SEASON=2026`
 
 El shortcut `wm26` esta en configuracion, no en codigo. Si OpenLigaDB publica el Mundial con otro shortcut, cambia `OPENLIGADB_LEAGUE_SHORTCUT` en `wrangler.toml`, `wrangler.sync.toml` y en los vars/secrets del entorno si aplica.
-
-API-Football queda solo como fallback opcional si existe `API_FOOTBALL_KEY`. La clave se configura como secreto y no se guarda en el repo.
 
 Las convocatorias iniciales se cargan desde `migrations/0002_seed_squads.sql`, generada desde los CSV de equipos/jugadores. Usa IDs internos negativos para no fingir IDs externos.
 
@@ -79,16 +77,7 @@ npm run build
 npm run cf:deploy
 ```
 
-### 5. Configurar secretos
-
-```bash
-npx wrangler pages secret put API_FOOTBALL_KEY --project-name porra-fortilin
-npx wrangler secret put API_FOOTBALL_KEY --config wrangler.sync.toml
-```
-
-Pega la key cuando Wrangler la pida. No la escribas en archivos del repo.
-
-### 6. Aplicar migraciones D1
+### 5. Aplicar migraciones D1
 
 ```bash
 npm run cf:migrate:remote
@@ -96,7 +85,7 @@ npm run cf:migrate:remote
 
 La migracion `0002_seed_squads.sql` carga 48 selecciones y 1247 jugadores en `squad_players`, mas alias de equipos y jugadores.
 
-### 7. Desplegar Pages y Worker Cron
+### 6. Desplegar Pages y Worker Cron
 
 ```bash
 npm run build
@@ -104,7 +93,7 @@ npm run cf:deploy
 npm run cf:deploy:sync
 ```
 
-El worker cron queda configurado cada 30 minutos. Respeta el presupuesto diario definido en `wrangler.sync.toml`.
+El worker cron queda configurado cada 5 minutos entre las 18:00 y las 05:00 de Madrid durante el horario de verano, y cada hora fuera de esa franja. Los moviles solo leen D1; nunca llaman directamente a OpenLigaDB.
 
 ## Desarrollo local
 

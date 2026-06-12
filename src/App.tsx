@@ -13,7 +13,6 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
-  clearDemoSession,
   changePassword,
   fetchBootstrap,
   login,
@@ -22,7 +21,6 @@ import {
   resetUserPassword,
   savePrediction,
   setDoublePoints,
-  setDemoSession,
   setMatchResult,
   setUserBonus,
   setUserPrediction,
@@ -50,6 +48,7 @@ export function App() {
   const [scores, setScores] = useState<ScoreDraft>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
     void refresh();
@@ -73,19 +72,20 @@ export function App() {
 
   async function refresh() {
     setLoading(true);
-    const bootstrap = await fetchBootstrap();
-    setData(bootstrap);
-    setLoading(false);
+    setLoadError(null);
+    try {
+      const bootstrap = await fetchBootstrap();
+      setData(bootstrap);
+    } catch (error) {
+      setData(null);
+      setLoadError(error instanceof Error ? error.message : "No se pudo cargar Porra Fortilin.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   async function handleSave(match: Match) {
     const draft = scores[match.id] ?? { home: 0, away: 0 };
-    if (data?.isDemo) {
-      updateLocalPrediction(match.id, draft.home, draft.away);
-      setNotice("Pronóstico guardado en modo demo.");
-      return;
-    }
-
     try {
       await savePrediction(match.id, draft.home, draft.away);
       await refresh();
@@ -95,35 +95,24 @@ export function App() {
     }
   }
 
-  function updateLocalPrediction(matchId: string, home: number, away: number) {
-    setData((current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        matches: current.matches.map((match) =>
-          match.id === matchId
-            ? {
-                ...match,
-                myPrediction: {
-                  id: match.myPrediction?.id ?? `local-${matchId}`,
-                  homeScore: home,
-                  awayScore: away,
-                  points: match.myPrediction?.points ?? 0,
-                  outcome: match.myPrediction?.outcome ?? "pending"
-                }
-              }
-            : match
-        )
-      };
-    });
-  }
-
-  if (loading || !data) {
+  if (loading || (!data && !loadError)) {
     return (
       <main className="app-shell loading-shell">
         <div className="loader-card">
           <Trophy size={34} />
           <p>Cargando Porra Fortilin...</p>
+        </div>
+      </main>
+    );
+  }
+
+  if (!data) {
+    return (
+      <main className="app-shell loading-shell">
+        <div className="loader-card">
+          <Trophy size={34} />
+          <p>{loadError}</p>
+          <button className="save-button wide" type="button" onClick={() => void refresh()}>Reintentar</button>
         </div>
       </main>
     );
@@ -144,7 +133,7 @@ export function App() {
     <main className="app-shell">
       <div className="stadium-bg" />
       <div className="content">
-        <Header data={appData} />
+        <Header data={appData} onProfile={() => setTab("profile")} />
         {notice ? <button className="notice" type="button" onClick={() => setNotice(null)}>{notice}</button> : null}
 
         {tab === "home" ? (
@@ -171,7 +160,7 @@ export function App() {
   );
 }
 
-function Header({ data }: { data: BootstrapData }) {
+function Header({ data, onProfile }: { data: BootstrapData; onProfile: () => void }) {
   return (
     <header className="topbar">
       <div className="brand">
@@ -183,10 +172,10 @@ function Header({ data }: { data: BootstrapData }) {
           <strong>Fortilin</strong>
         </div>
       </div>
-      <div className="profile-dot" title={data.user?.displayName}>
+      <button className="profile-dot" type="button" title={data.user?.displayName} onClick={onProfile} aria-label="Editar perfil">
         <span>{initials(data.user?.displayName || "PF")}</span>
         <i />
-      </div>
+      </button>
     </header>
   );
 }
@@ -386,7 +375,7 @@ function BonusView({ data }: { data: BootstrapData }) {
   const teamById = new Map(data.teams.map((team) => [team.id, team]));
   const bonus = data.bonus;
   const scorerTeam = bonus?.topScorerTeamId ? teamById.get(bonus.topScorerTeamId)?.name : null;
-  const scorers = getTopScorers(data.matches);
+  const scorers = getTopScorers(data.matches, data.squadPlayers);
   return (
     <section className="view-stack">
       <div className="view-header">
@@ -419,9 +408,15 @@ function BonusView({ data }: { data: BootstrapData }) {
         )}
       </div>
       <div className="rules-card">
-        <strong>Reglas rapidas</strong>
-        <span>Exacto 3 pts · Tendencia 1 pt · Grupo de España x2</span>
-        <span>Campeón +10 · Subcampeón +5 · Goleador +5</span>
+        <strong>Reglas de puntuacion</strong>
+        <ul>
+          <li>Resultado exacto: 3 puntos.</li>
+          <li>Tendencia: 1 punto si aciertas ganador o empate aunque falle el marcador.</li>
+          <li>Fallo: 0 puntos.</li>
+          <li>Los partidos marcados como x2 duplican los puntos del pronostico.</li>
+          <li>Bonus bloqueados al crear usuario: campeon +10, subcampeon +5 y maximo goleador +5.</li>
+          <li>El maximo goleador se valida contra OpenLigaDB y se normaliza con la convocatoria cargada.</li>
+        </ul>
       </div>
     </section>
   );
@@ -445,23 +440,14 @@ function ProfileView({
   }, [data.user?.displayName]);
 
   async function handleLogout() {
-    if (data.isDemo) clearDemoSession();
-    else await logout();
+    await logout();
     await onRefresh();
   }
 
   async function handleProfileSave(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     try {
-      if (data.isDemo) {
-        setDemoSession({
-          username: data.user?.username || "demo",
-          displayName,
-          isAdmin: data.user?.isAdmin === true
-        });
-      } else {
-        await updateProfile(displayName);
-      }
+      await updateProfile(displayName);
       onNotice("Perfil actualizado.");
       await onRefresh();
     } catch (error) {
@@ -476,7 +462,7 @@ function ProfileView({
       return;
     }
     try {
-      if (!data.isDemo) await changePassword(currentPassword, newOwnPassword);
+      await changePassword(currentPassword, newOwnPassword);
       setCurrentPassword("");
       setNewOwnPassword("");
       onNotice("Contraseña actualizada.");
@@ -578,12 +564,8 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
 
   async function handleSquadSync() {
     try {
-      if (data.isDemo) {
-        onNotice("Modo demo sin D1: aplica migraciones en Cloudflare para cargar convocatorias reales.");
-      } else {
-        const result = await syncSquads();
-        onNotice(`${result.message} Requests usados: ${result.requestsUsed}.`);
-      }
+      const result = await syncSquads();
+      onNotice(`${result.message} Requests usados: ${result.requestsUsed}.`);
       await onRefresh();
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "No se pudieron cargar convocatorias.");
@@ -592,12 +574,8 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
 
   async function handleResultSync() {
     try {
-      if (data.isDemo) {
-        onNotice("Sincronización demo omitida.");
-      } else {
-        const result = await syncResults();
-        onNotice(`${result.message} Requests usados: ${result.requestsUsed}.`);
-      }
+      const result = await syncResults();
+      onNotice(`${result.message} Requests usados: ${result.requestsUsed}.`);
       await onRefresh();
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "No se pudieron sincronizar resultados.");
@@ -607,7 +585,7 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
   async function saveResult() {
     if (!match) return;
     try {
-      if (!data.isDemo) await setMatchResult(match.id, home, away);
+      await setMatchResult(match.id, home, away);
       onNotice("Resultado actualizado.");
       await onRefresh();
     } catch (error) {
@@ -618,7 +596,7 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
   async function toggleDouble() {
     if (!match) return;
     try {
-      if (!data.isDemo) await setDoublePoints(match.id, !match.isDoublePoints);
+      await setDoublePoints(match.id, !match.isDoublePoints);
       onNotice("Puntos dobles actualizados.");
       await onRefresh();
     } catch (error) {
@@ -636,7 +614,7 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
       return;
     }
     try {
-      if (!data.isDemo) await resetUserPassword(targetUserId, newPassword);
+      await resetUserPassword(targetUserId, newPassword);
       setNewPassword("");
       onNotice("Contraseña reseteada. El usuario tendrá que iniciar sesión otra vez.");
       await onRefresh();
@@ -651,7 +629,7 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
       return;
     }
     try {
-      if (!data.isDemo) await setUserPrediction(targetUserId, match.id, userHome, userAway);
+      await setUserPrediction(targetUserId, match.id, userHome, userAway);
       onNotice("Pronóstico de usuario actualizado.");
       await onRefresh();
     } catch (error) {
@@ -673,14 +651,12 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
       return;
     }
     try {
-      if (!data.isDemo) {
-        await setUserBonus(targetUserId, {
-          championTeamId: bonusChampionId,
-          runnerUpTeamId: bonusRunnerUpId,
-          topScorerTeamId: bonusScorerTeamId,
-          topScorerPlayerId: bonusScorerPlayerId
-        });
-      }
+      await setUserBonus(targetUserId, {
+        championTeamId: bonusChampionId,
+        runnerUpTeamId: bonusRunnerUpId,
+        topScorerTeamId: bonusScorerTeamId,
+        topScorerPlayerId: bonusScorerPlayerId
+      });
       onNotice("Bonus del usuario actualizado.");
       await onRefresh();
     } catch (error) {
@@ -829,14 +805,7 @@ function AuthScreen({ data, onDone }: { data: BootstrapData; onDone: () => Promi
       return;
     }
     try {
-      if (data.isDemo) {
-        const isAdminLogin = mode === "login" && form.username.toLowerCase() === "admin" && form.password === "Porra.44";
-        setDemoSession({
-          username: form.username || (isAdminLogin ? "admin" : "demo"),
-          displayName: isAdminLogin ? "Admin Fortilin" : form.displayName || form.username || "Usuario Fortilin",
-          isAdmin: isAdminLogin
-        });
-      } else if (mode === "login") {
+      if (mode === "login") {
         await login(form.username, form.password);
       } else {
         await register({
@@ -1118,22 +1087,24 @@ function formatGoal(goal: Match["goals"][number]): string {
   return [goal.scorerName || "Gol", goal.isPenalty ? "(p)" : goal.isOwnGoal ? "(pp)" : ""].filter(Boolean).join(" ");
 }
 
-function getTopScorers(matches: Match[]): ScorerRow[] {
+function getTopScorers(matches: Match[], squadPlayers: SquadPlayer[] = []): ScorerRow[] {
   const scorers = new Map<string, ScorerRow>();
 
   for (const match of matches) {
     let previousHome = 0;
     let previousAway = 0;
     for (const goal of match.goals || []) {
-      if (!goal.scorerName) {
+      if (!goal.scorerName || goal.isOwnGoal) {
         previousHome = goal.homeScore;
         previousAway = goal.awayScore;
         continue;
       }
 
+      const teamId = goal.homeScore > previousHome ? match.homeTeam.id : goal.awayScore > previousAway ? match.awayTeam.id : null;
       const teamName = goal.homeScore > previousHome ? match.homeTeam.name : goal.awayScore > previousAway ? match.awayTeam.name : "";
-      const key = `${goal.scorerName}|${teamName}`;
-      const current = scorers.get(key) ?? { player: goal.scorerName, teamName, goals: 0 };
+      const player = canonicalScorerName(goal.scorerName, teamId, squadPlayers);
+      const key = `${player}|${teamName}`;
+      const current = scorers.get(key) ?? { player, teamName, goals: 0 };
       current.goals += 1;
       scorers.set(key, current);
       previousHome = goal.homeScore;
@@ -1142,6 +1113,52 @@ function getTopScorers(matches: Match[]): ScorerRow[] {
   }
 
   return [...scorers.values()].sort((left, right) => right.goals - left.goals || left.player.localeCompare(right.player)).slice(0, 20);
+}
+
+function canonicalScorerName(name: string, teamId: string | null, squadPlayers: SquadPlayer[]): string {
+  if (!teamId) return name;
+  const candidates = squadPlayers.filter((player) => player.teamId === teamId);
+  return findPersonNameMatch(name, candidates.map((player) => player.name)) ?? name;
+}
+
+function findPersonNameMatch(name: string, candidates: string[]): string | null {
+  const normalizedName = normalizePersonName(name);
+  if (!normalizedName) return null;
+
+  for (const candidate of candidates) {
+    const normalizedCandidate = normalizePersonName(candidate);
+    if (normalizedCandidate === normalizedName) return candidate;
+    if (normalizedCandidate.includes(normalizedName) || normalizedName.includes(normalizedCandidate)) return candidate;
+  }
+
+  const nameTokens = normalizedName.split(" ").filter(Boolean);
+  const lastName = nameTokens[nameTokens.length - 1];
+  const firstInitial = nameTokens[0]?.[0];
+  const tokenSet = new Set(nameTokens);
+
+  for (const candidate of candidates) {
+    const candidateTokens = normalizePersonName(candidate).split(" ").filter(Boolean);
+    if (nameTokens.length >= 2 && candidateTokens.includes(lastName) && candidateTokens.some((token) => token[0] === firstInitial)) {
+      return candidate;
+    }
+    if (nameTokens.length >= 2 && nameTokens.every((token) => candidateTokens.includes(token))) {
+      return candidate;
+    }
+    if (candidateTokens.length >= 2 && candidateTokens.every((token) => tokenSet.has(token))) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function normalizePersonName(name: string): string {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function shortTeam(name: string): string {

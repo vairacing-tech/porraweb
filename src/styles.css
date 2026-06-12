@@ -54,7 +54,8 @@ button {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scroll-padding-bottom: 150px;
+  scroll-padding-top: calc(18px + env(safe-area-inset-top));
+  scroll-padding-bottom: calc(190px + env(safe-area-inset-bottom));
   background: #04170f;
 }
 
@@ -73,7 +74,7 @@ button {
   position: relative;
   z-index: 1;
   min-height: 100vh;
-  padding: max(16px, env(safe-area-inset-top)) 12px calc(150px + env(safe-area-inset-bottom));
+  padding: calc(18px + env(safe-area-inset-top)) 12px calc(190px + env(safe-area-inset-bottom));
 }
 
 .topbar {
@@ -125,10 +126,12 @@ button {
   width: 58px;
   height: 58px;
   flex: 0 0 auto;
+  padding: 0;
   border: 3px solid rgba(255, 255, 255, 0.92);
   border-radius: 50%;
   background: linear-gradient(135deg, #0f8b46, #08351e);
   color: white;
+  cursor: pointer;
   font-weight: 900;
   box-shadow: var(--shadow);
 }
@@ -177,16 +180,16 @@ button {
 
 .hero-teams {
   display: grid;
-  grid-template-columns: 58px 1fr 58px;
+  grid-template-columns: 52px minmax(0, 1fr) 52px;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
 }
 
 .hero-names {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: center;
-  gap: 8px;
+  gap: 6px;
   text-align: center;
   min-width: 0;
 }
@@ -194,10 +197,12 @@ button {
 .hero-names strong {
   min-width: 0;
   overflow: hidden;
-  font-size: 21px;
-  line-height: 1.05;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 16px;
+  line-height: 1.08;
+  overflow-wrap: anywhere;
   text-shadow: 0 2px 4px rgba(0, 0, 0, 0.28);
 }
 
@@ -369,8 +374,8 @@ button {
 }
 
 .team-badge.large {
-  width: 58px;
-  height: 58px;
+  width: 52px;
+  height: 52px;
 }
 
 .team-badge b {
@@ -782,9 +787,17 @@ button {
   color: var(--green-300);
 }
 
-.rules-card span {
+.rules-card span,
+.rules-card li {
   color: rgba(255, 255, 255, 0.78);
   font-size: 13px;
+}
+
+.rules-card ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
 }
 
 .profile-card {
@@ -918,7 +931,7 @@ button {
   grid-template-columns: repeat(5, 1fr);
   width: min(100%, 430px);
   margin: 0 auto;
-  padding: 10px 6px max(12px, env(safe-area-inset-bottom));
+  padding: 10px 6px calc(12px + env(safe-area-inset-bottom));
   border-radius: 8px 8px 0 0;
   background: #fff;
   box-shadow: 0 -12px 34px rgba(0, 0, 0, 0.24);
@@ -1070,7 +1083,7 @@ button {
   }
 
   .hero-names strong {
-    font-size: 18px;
+    font-size: 15px;
   }
 
   .score-row {

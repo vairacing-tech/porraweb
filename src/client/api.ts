@@ -1,4 +1,3 @@
-import { initialMatches, initialTeams } from "../shared/fixtures";
 import type { BonusPrediction, LeaderboardRow, Match, SquadPlayer, Team } from "../shared/types";
 
 export interface BootstrapData {
@@ -13,7 +12,6 @@ export interface BootstrapData {
   bonus: BonusPrediction | null;
   adminUsers?: AdminUser[];
   now: string;
-  isDemo?: boolean;
 }
 
 export interface AdminUser {
@@ -38,11 +36,7 @@ export interface RegisterInput {
 }
 
 export async function fetchBootstrap(): Promise<BootstrapData> {
-  try {
-    return await request<BootstrapData>("/api/bootstrap");
-  } catch {
-    return demoBootstrap();
-  }
+  return await request<BootstrapData>("/api/bootstrap");
 }
 
 export async function login(username: string, password: string): Promise<void> {
@@ -75,14 +69,6 @@ export async function changePassword(currentPassword: string, newPassword: strin
     method: "PUT",
     body: JSON.stringify({ currentPassword, newPassword })
   });
-}
-
-export function setDemoSession(input: { username: string; displayName: string; isAdmin: boolean }): void {
-  localStorage.setItem("pf_demo_user", JSON.stringify(input));
-}
-
-export function clearDemoSession(): void {
-  localStorage.removeItem("pf_demo_user");
 }
 
 export async function savePrediction(matchId: string, homeScore: number, awayScore: number): Promise<void> {
@@ -155,73 +141,4 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(data.error || "Error de red.");
   }
   return data as T;
-}
-
-function demoBootstrap(): BootstrapData {
-  const storedUser = getDemoUser();
-  const teams = initialTeams.map((team) => ({
-    id: team.id,
-    name: team.name,
-    shortCode: team.shortCode
-  }));
-  const byId = new Map(teams.map((team) => [team.id, team]));
-  const matches = initialMatches.map((match, index) => ({
-    id: match.id,
-    stage: match.stage,
-    round: match.round,
-    matchday: match.matchday,
-    groupName: match.groupName,
-    homeTeam: byId.get(match.homeTeamId)!,
-    awayTeam: byId.get(match.awayTeamId)!,
-    kickoffAt: match.kickoffAt,
-    lockAt: match.lockAt,
-    status: index === 0 ? "live" : "scheduled",
-    homeScore: null,
-    awayScore: null,
-    extraHomeScore: null,
-    extraAwayScore: null,
-    penaltyHomeScore: null,
-    penaltyAwayScore: null,
-    goals: [],
-    isDoublePoints: match.isDoublePoints,
-    myPrediction: null
-  })) satisfies BootstrapData["matches"];
-  const nextMatch = matches.find((match) => new Date(match.kickoffAt).getTime() > Date.now()) ?? matches[0];
-
-  return {
-    appName: "Porra Fortilin",
-    league: { id: "fortilin", name: "Fortilin" },
-    user: storedUser
-      ? {
-          id: storedUser.isAdmin ? "demo-admin" : "demo-user",
-          username: storedUser.username,
-          displayName: storedUser.displayName,
-          isAdmin: storedUser.isAdmin,
-          leagueId: "fortilin"
-        }
-      : null,
-    teams,
-    squadPlayers: [],
-    matches,
-    nextMatch,
-    leaderboard: storedUser && !storedUser.isAdmin
-      ? [{ userId: "demo-user", displayName: storedUser.displayName, points: 0, exacts: 0, championHit: false, rank: 1 }]
-      : [],
-    bonus: null,
-    adminUsers: storedUser?.isAdmin ? [] : undefined,
-    now: new Date().toISOString(),
-    isDemo: true
-  };
-}
-
-function getDemoUser(): { username: string; displayName: string; isAdmin: boolean } | null {
-  const raw = localStorage.getItem("pf_demo_user");
-  if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as { username?: string; displayName?: string; isAdmin?: boolean };
-    if (!parsed.username || !parsed.displayName) return null;
-    return { username: parsed.username, displayName: parsed.displayName, isAdmin: parsed.isAdmin === true };
-  } catch {
-    return null;
-  }
 }
