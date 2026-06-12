@@ -563,6 +563,7 @@ function LeaderboardView({ data, onSelectUser }: { data: BootstrapData; onSelect
 
 function WorldStandingsView({ data }: { data: BootstrapData }) {
   const groups = useMemo(() => groupWorldStandings(data.worldStandings), [data.worldStandings]);
+  const bestThirdKeys = useMemo(() => getBestThirdPlaceKeys(data.worldStandings), [data.worldStandings]);
   const updatedAt = data.worldStandings[0]?.updatedAt ?? null;
 
   return (
@@ -591,23 +592,34 @@ function WorldStandingsView({ data }: { data: BootstrapData }) {
               <span>DG</span>
               <span>Pts</span>
             </div>
-            {group.rows.map((row) => (
-              <div className="world-row" key={`${group.name}-${row.teamId ?? row.teamName}`}>
-                <span>{row.rank}</span>
-                <TeamBadge team={{ id: row.teamId ?? row.teamName, name: row.teamName, shortCode: row.shortCode ?? row.teamName.slice(0, 3), logoUrl: row.logoUrl }} />
-                <strong>{row.teamName}</strong>
-                <em>{row.played}</em>
-                <em>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</em>
-                <b>{row.points}</b>
-              </div>
-            ))}
+            {group.rows.map((row) => {
+              const qualification = worldQualificationStatus(row, bestThirdKeys);
+              return (
+                <div className={`world-row ${qualification}`} key={`${group.name}-${row.teamId ?? row.teamName}`}>
+                  <span>{row.rank}</span>
+                  <TeamBadge team={{ id: row.teamId ?? row.teamName, name: row.teamName, shortCode: row.shortCode ?? row.teamName.slice(0, 3), logoUrl: row.logoUrl }} />
+                  <strong>{row.teamName}</strong>
+                  <em>{row.played}</em>
+                  <em>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</em>
+                  <b>{row.points}</b>
+                </div>
+              );
+            })}
           </div>
         </section>
       ))}
+      {groups.length > 0 ? (
+        <div className="world-legend">
+          <span><i className="legend-direct" /> 1.º y 2.º: pasan directos</span>
+          <span><i className="legend-third" /> 8 mejores terceros</span>
+          <small>Provisional según puntos, diferencia de goles y goles a favor publicados por OpenLigaDB.</small>
+        </div>
+      ) : null}
       <div className="rules-card">
         <strong>Fase de grupos y eliminatorias</strong>
         <ul>
           <li>Esta pantalla muestra la fase de grupos desde OpenLigaDB y se actualiza con el worker.</li>
+          <li>Se clasifican los dos primeros de cada grupo y los ocho mejores terceros.</li>
           <li>Cuando empiecen eliminatorias, los partidos seguirán apareciendo en Partidos bajo el filtro “Elim.”.</li>
           <li>Los pronósticos ya guardados y la clasificación de la porra no se recalculan salvo que cambie el resultado real del partido.</li>
         </ul>
@@ -1566,6 +1578,31 @@ function groupWorldStandings(rows: BootstrapData["worldStandings"]): Array<{ nam
       name,
       rows: [...groupRows].sort((left, right) => left.rank - right.rank)
     }));
+}
+
+function getBestThirdPlaceKeys(rows: BootstrapData["worldStandings"]): Set<string> {
+  const bestThirds = rows
+    .filter((row) => row.rank === 3)
+    .sort(
+      (left, right) =>
+        right.points - left.points ||
+        right.goalDiff - left.goalDiff ||
+        right.goalsFor - left.goalsFor ||
+        left.teamName.localeCompare(right.teamName, "es")
+    )
+    .slice(0, 8);
+
+  return new Set(bestThirds.map(worldStandingKey));
+}
+
+function worldQualificationStatus(row: BootstrapData["worldStandings"][number], bestThirdKeys: Set<string>): "qualified-direct" | "qualified-third" | "not-qualified" {
+  if (row.rank <= 2) return "qualified-direct";
+  if (row.rank === 3 && bestThirdKeys.has(worldStandingKey(row))) return "qualified-third";
+  return "not-qualified";
+}
+
+function worldStandingKey(row: BootstrapData["worldStandings"][number]): string {
+  return row.teamId ?? `${row.groupName}-${row.teamName}`;
 }
 
 function sortGroupName(left: string, right: string): number {
