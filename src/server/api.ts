@@ -1,9 +1,11 @@
 import { clearSessionCookie, createSession, getAuthUser, loginUser, registerUser, sessionCookie } from "./auth";
 import {
   createBonus,
+  deleteUserAsAdmin,
   ensureSeeded,
   getBonus,
   getLeaderboard,
+  getLeaguePredictions,
   getLeagueUsers,
   getMatches,
   getSquadPlayers,
@@ -89,6 +91,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       const squadPlayers = await getSquadPlayers(env);
       const bonus = user ? await getBonus(env, user.id) : null;
       const adminUsers = user?.isAdmin ? await getLeagueUsers(env) : undefined;
+      const adminPredictions = user?.isAdmin ? await getLeaguePredictions(env) : undefined;
       const now = new Date().toISOString();
       const nowMs = Date.now();
       const currentWindowMs = 3 * 60 * 60 * 1000;
@@ -112,6 +115,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         leaderboard,
         bonus,
         adminUsers,
+        adminPredictions,
         now
       });
     }
@@ -183,6 +187,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
 
       if (segments[1] === "users" && segments.length === 2 && method === "GET") {
         return json({ users: await getLeagueUsers(env) });
+      }
+
+      if (segments[1] === "users" && segments.length === 3 && method === "DELETE") {
+        await deleteUserAsAdmin(env, user!.id, segments[2]);
+        return json({ ok: true });
       }
 
       if (segments[1] === "users" && segments[3] === "password" && method === "PUT") {

@@ -1,4 +1,4 @@
-import type { BonusPrediction, LeaderboardRow, Match, SquadPlayer, Team } from "../shared/types";
+import type { BonusPrediction, LeaderboardRow, Match, Prediction, SquadPlayer, Team } from "../shared/types";
 
 export interface BootstrapData {
   appName: string;
@@ -11,6 +11,7 @@ export interface BootstrapData {
   leaderboard: LeaderboardRow[];
   bonus: BonusPrediction | null;
   adminUsers?: AdminUser[];
+  adminPredictions?: Prediction[];
   now: string;
 }
 
@@ -21,6 +22,14 @@ export interface AdminUser {
   role: string;
   isAdmin: boolean;
   bonus: BonusPrediction | null;
+}
+
+export interface VisiblePrediction {
+  displayName: string;
+  homeScore: number;
+  awayScore: number;
+  points: number;
+  outcome: string;
 }
 
 export interface RegisterInput {
@@ -78,11 +87,20 @@ export async function savePrediction(matchId: string, homeScore: number, awaySco
   });
 }
 
+export async function fetchMatchPredictions(matchId: string): Promise<VisiblePrediction[]> {
+  const data = await request<{ predictions: VisiblePrediction[] }>(`/api/matches/${matchId}/predictions`);
+  return data.predictions;
+}
+
 export async function resetUserPassword(userId: string, newPassword: string): Promise<void> {
   await request(`/api/admin/users/${userId}/password`, {
     method: "PUT",
     body: JSON.stringify({ newPassword })
   });
+}
+
+export async function deleteUser(userId: string): Promise<void> {
+  await request(`/api/admin/users/${userId}`, { method: "DELETE" });
 }
 
 export async function setUserPrediction(userId: string, matchId: string, homeScore: number, awayScore: number): Promise<void> {

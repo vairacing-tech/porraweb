@@ -66,9 +66,27 @@ describe("OpenLigaDB provider", () => {
     expect(parsed.awayScore).toBe(0);
   });
 
-  it("marks unfinished group matches as finished when final result is published after group-stage duration", () => {
+  it("keeps unfinished group matches live inside the extended group-stage fallback window", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-06-11T21:35:00.000Z"));
+
+    const parsed = parseOpenLigaDbMatch({
+      matchID: 81464,
+      matchDateTime: "2026-06-11T21:00:00",
+      matchDateTimeUTC: "2026-06-11T19:00:00Z",
+      matchIsFinished: false,
+      team1: { teamName: "Mexiko", shortName: "MEX" },
+      team2: { teamName: "Sudafrica", shortName: "RSA" },
+      group: { groupName: "1. Runde", groupOrderID: 1 },
+      matchResults: [{ resultTypeID: 2, resultName: "Endergebnis", pointsTeam1: 2, pointsTeam2: 0 }]
+    });
+
+    expect(parsed.status).toBe("live");
+  });
+
+  it("marks unfinished group matches as finished after the extended fallback window", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-12T00:35:00.000Z"));
 
     const parsed = parseOpenLigaDbMatch({
       matchID: 81464,

@@ -295,6 +295,34 @@ export async function getLeagueUsers(env: Env, leagueId = "fortilin"): Promise<A
   }));
 }
 
+export async function getLeaguePredictions(env: Env, leagueId = "fortilin"): Promise<Prediction[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT id, user_id, match_id, home_score, away_score, points, outcome
+     FROM predictions
+     WHERE league_id = ?1`
+  )
+    .bind(leagueId)
+    .all<{
+      id: string;
+      user_id: string;
+      match_id: string;
+      home_score: number;
+      away_score: number;
+      points: number;
+      outcome: Prediction["outcome"];
+    }>();
+
+  return results.map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    matchId: row.match_id,
+    homeScore: row.home_score,
+    awayScore: row.away_score,
+    points: row.points,
+    outcome: row.outcome
+  }));
+}
+
 export async function getBonus(env: Env, userId: string): Promise<BonusPrediction | null> {
   const row = await env.DB.prepare(
     `SELECT champion_team_id, runner_up_team_id, top_scorer_team_id, top_scorer_player_id, top_scorer, points, locked_at
@@ -494,6 +522,36 @@ export async function resetUserPassword(env: Env, actorUserId: string, targetUse
     env.DB.prepare(
       "INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id, payload, created_at) VALUES (?1, ?2, 'reset_password', 'user', ?3, '{}', ?4)"
     ).bind(createId("aud"), actorUserId, targetUserId, now)
+  ]);
+}
+
+export async function deleteUserAsAdmin(env: Env, actorUserId: string, targetUserId: string): Promise<void> {
+  if (actorUserId === targetUserId) {
+    throw new HttpError(400, "El admin no puede eliminarse a si mismo.");
+  }
+
+  const target = await env.DB.prepare("SELECT id, display_name, username, is_admin FROM users WHERE id = ?1")
+    .bind(targetUserId)
+    .first<{ id: string; display_name: string; username: string; is_admin: number }>();
+  if (!target) throw new HttpError(404, "Usuario no encontrado.");
+  if (target.is_admin === 1) throw new HttpError(400, "No se puede eliminar un usuario admin.");
+
+  const now = new Date().toISOString();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM sessions WHERE user_id = ?1").bind(targetUserId),
+    env.DB.prepare("DELETE FROM bonus_predictions WHERE user_id = ?1").bind(targetUserId),
+    env.DB.prepare("DELETE FROM predictions WHERE user_id = ?1").bind(targetUserId),
+    env.DB.prepare("DELETE FROM league_members WHERE user_id = ?1").bind(targetUserId),
+    env.DB.prepare("DELETE FROM users WHERE id = ?1").bind(targetUserId),
+    env.DB.prepare(
+      "INSERT INTO audit_log (id, actor_user_id, action, entity_type, entity_id, payload, created_at) VALUES (?1, ?2, 'delete_user', 'user', ?3, ?4, ?5)"
+    ).bind(
+      createId("aud"),
+      actorUserId,
+      targetUserId,
+      JSON.stringify({ username: target.username, displayName: target.display_name }),
+      now
+    )
   ]);
 }
 

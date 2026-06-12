@@ -77,6 +77,31 @@ button {
   padding: calc(18px + env(safe-area-inset-top)) 12px calc(190px + env(safe-area-inset-bottom));
 }
 
+.pull-refresh {
+  position: fixed;
+  top: calc(8px + env(safe-area-inset-top));
+  left: 50%;
+  z-index: 4;
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  padding: 7px 12px;
+  border: 1px solid rgba(116, 223, 88, 0.45);
+  border-radius: 999px;
+  background: rgba(3, 33, 18, 0.92);
+  color: white;
+  font-size: 12px;
+  font-weight: 900;
+  text-align: center;
+  opacity: 0.96;
+  pointer-events: none;
+  translate: -50% -100%;
+  transition: transform 0.12s ease;
+}
+
+.pull-refresh.active {
+  background: linear-gradient(180deg, #28c45b, #0b8e3b);
+}
+
 .topbar {
   display: flex;
   align-items: center;
@@ -434,6 +459,7 @@ button {
 
 .goal-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 4px;
   margin-top: 8px;
   color: #33433a;
@@ -451,14 +477,76 @@ button {
   text-overflow: ellipsis;
 }
 
+.goal-item.home {
+  grid-column: 1;
+  justify-self: stretch;
+}
+
+.goal-item.away {
+  grid-column: 2;
+  justify-self: stretch;
+  text-align: right;
+}
+
 .compact-goals {
   width: min(100%, 320px);
   margin: 10px auto 0;
   color: rgba(255, 255, 255, 0.92);
+  grid-template-columns: 1fr;
 }
 
 .compact-goals span {
   background: rgba(0, 0, 0, 0.22);
+}
+
+.compact-goals .goal-item.home,
+.compact-goals .goal-item.away {
+  grid-column: 1;
+  text-align: center;
+}
+
+.visible-predictions {
+  display: grid;
+  gap: 5px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+  font-size: 11.5px;
+}
+
+.visible-predictions strong {
+  color: var(--green-700);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.visible-predictions span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: rgba(20, 120, 50, 0.08);
+}
+
+.visible-predictions b {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.visible-predictions em {
+  color: #17231c;
+  font-style: normal;
+  font-weight: 950;
+}
+
+.visible-predictions small {
+  color: #116b2d;
+  font-weight: 950;
 }
 
 .card-actions {
@@ -613,7 +701,8 @@ button {
 }
 
 .link-button,
-.ghost-button {
+.ghost-button,
+.danger-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -626,6 +715,16 @@ button {
   font-size: 12px;
   font-weight: 950;
   text-transform: uppercase;
+}
+
+.danger-button {
+  border-color: rgba(175, 25, 25, 0.22);
+  background: #fff1f1;
+  color: #b32626;
+}
+
+.danger-button:disabled {
+  opacity: 0.55;
 }
 
 .link-button {
@@ -849,6 +948,19 @@ button {
   color: #125b2a;
   font-size: 12px;
   font-weight: 800;
+}
+
+.admin-message {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid rgba(12, 122, 53, 0.16);
+  border-radius: 8px;
+  background: #eef9f1;
+  color: #125b2a;
+  font-size: 12px;
+  font-weight: 850;
+  text-align: left;
 }
 
 .admin-section {

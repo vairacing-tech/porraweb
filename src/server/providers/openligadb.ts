@@ -85,7 +85,7 @@ export function getOpenLigaDbConfig(env: Env): OpenLigaDbConfig | null {
   };
 }
 
-export async function fetchOpenLigaDbMatches(env: Env): Promise<OpenLigaDbMatch[]> {
+export async function fetchOpenLigaDbMatches(env: Env, groupOrderIds: number[] = []): Promise<OpenLigaDbMatch[]> {
   const config = getOpenLigaDbConfig(env);
   if (!config) {
     console.error("OPENLIGADB CONFIG MISSING", {
@@ -95,7 +95,17 @@ export async function fetchOpenLigaDbMatches(env: Env): Promise<OpenLigaDbMatch[
     return [];
   }
 
-  const matches = await fetchJson<OpenLigaDbMatch[]>(`${config.baseUrl}/getmatchdata/${config.leagueShortcut}/${config.season}`);
+  const uniqueGroupOrderIds = [...new Set(groupOrderIds.filter((groupOrderId) => Number.isFinite(groupOrderId)))];
+  const matches =
+    uniqueGroupOrderIds.length > 0
+      ? (
+          await Promise.all(
+            uniqueGroupOrderIds.map((groupOrderId) =>
+              fetchJson<OpenLigaDbMatch[]>(`${config.baseUrl}/getmatchdata/${config.leagueShortcut}/${config.season}/${groupOrderId}`)
+            )
+          )
+        ).flat()
+      : await fetchJson<OpenLigaDbMatch[]>(`${config.baseUrl}/getmatchdata/${config.leagueShortcut}/${config.season}`);
   const goalGetters = await fetchJson<OpenLigaDbGoalGetter[]>(`${config.baseUrl}/getgoalgetters/${config.leagueShortcut}/${config.season}`);
   return enrichGoalGetterNames(matches, goalGetters);
 }
@@ -208,8 +218,8 @@ function getStatus(match: OpenLigaDbMatch, kickoffAt: string, finalResult: OpenL
 
 function getLiveWindowMs(match: OpenLigaDbMatch): number {
   const groupOrder = match.group?.groupOrderID ?? 0;
-  const groupStageWindow = 150 * 60 * 1000;
-  const knockoutWindow = 210 * 60 * 1000;
+  const groupStageWindow = 270 * 60 * 1000;
+  const knockoutWindow = 330 * 60 * 1000;
   return groupOrder > 0 && groupOrder <= 3 ? groupStageWindow : knockoutWindow;
 }
 

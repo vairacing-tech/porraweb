@@ -14,6 +14,10 @@ type MatchSyncRow = {
   id: string;
   api_fixture_id: number | null;
   kickoff_at: string;
+  matchday: number | null;
+  status: string;
+  home_score: number | null;
+  away_score: number | null;
   home_team_id: string;
   away_team_id: string;
 };
@@ -142,9 +146,17 @@ async function runOpenLigaDbResultSync(env: Env): Promise<{ ok: boolean; request
   await ensureSeeded(env);
 
   try {
+    const targets = await getSyncMatchTargets(env);
+    if (targets.length === 0) {
+      const message = "No hay partidos no finalizados en la ventana de sincronización.";
+      await logSync(env, "skipped", 0, message, "openligadb");
+      return { ok: true, requestsUsed: 0, message };
+    }
+
     const teams = await fetchOpenLigaDbTeams(env);
     const teamsUpdated = await applyOpenLigaDbTeams(env, teams);
-    const matches = await fetchOpenLigaDbMatches(env);
+    const targetMatchdays = targets.map((match) => match.matchday).filter((matchday): matchday is number => typeof matchday === "number");
+    const matches = await fetchOpenLigaDbMatches(env, targetMatchdays);
 
     if (matches.length === 0) {
       const message = "OpenLigaDB no devolvio partidos para la configuracion actual.";
@@ -153,8 +165,8 @@ async function runOpenLigaDbResultSync(env: Env): Promise<{ ok: boolean; request
     }
 
     const parsedMatches = matches.map(parseOpenLigaDbMatch);
-    const { linked, updated } = await applyOpenLigaDbMatches(env, parsedMatches);
-    const message = `OpenLigaDB: ${matches.length} partidos leidos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado.`;
+    const { linked, updated } = await applyOpenLigaDbMatches(env, parsedMatches, targets);
+    const message = `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leidos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado.`;
     await logSync(env, "ok", 0, message, "openligadb");
     return { ok: true, requestsUsed: 0, message };
   } catch (error) {
@@ -185,8 +197,11 @@ async function applyOpenLigaDbTeams(env: Env, teams: Array<{ teamName: string; t
   return updated;
 }
 
-async function applyOpenLigaDbMatches(env: Env, parsedMatches: ParsedOpenLigaDbMatch[]): Promise<{ linked: number; updated: number }> {
-  const targets = await getAllMatchTargets(env);
+async function applyOpenLigaDbMatches(
+  env: Env,
+  parsedMatches: ParsedOpenLigaDbMatch[],
+  targets: MatchSyncRow[]
+): Promise<{ linked: number; updated: number }> {
   const squadNameCache = new Map<string, string[]>();
   let linked = 0;
   let updated = 0;
@@ -217,7 +232,9 @@ async function applyOpenLigaDbMatches(env: Env, parsedMatches: ParsedOpenLigaDbM
       .run();
 
     linked += 1;
-    if (parsed.status === "finished" && parsed.homeScore !== null && parsed.awayScore !== null) {
+    const scoreChanged = match.home_score !== parsed.homeScore || match.away_score !== parsed.awayScore;
+    const finishedChanged = match.status !== "finished" && parsed.status === "finished";
+    if (parsed.status === "finished" && parsed.homeScore !== null && parsed.awayScore !== null && (scoreChanged || finishedChanged)) {
       await recalculateMatch(env, match.id);
       updated += 1;
     }
@@ -264,12 +281,19 @@ async function getSquadNames(env: Env, teamId: string, squadNameCache: Map<strin
   return names;
 }
 
-async function getAllMatchTargets(env: Env): Promise<MatchSyncRow[]> {
+async function getSyncMatchTargets(env: Env): Promise<MatchSyncRow[]> {
+  const now = Date.now();
+  const from = new Date(now - 7 * 60 * 60 * 1000).toISOString();
+  const to = new Date(now + 3 * 60 * 60 * 1000).toISOString();
   const { results } = await env.DB.prepare(
-    `SELECT id, api_fixture_id, kickoff_at, home_team_id, away_team_id
+    `SELECT id, api_fixture_id, kickoff_at, matchday, status, home_score, away_score, home_team_id, away_team_id
      FROM matches
+     WHERE status <> 'finished'
+       AND kickoff_at BETWEEN ?1 AND ?2
      ORDER BY kickoff_at ASC`
-  ).all<MatchSyncRow>();
+  )
+    .bind(from, to)
+    .all<MatchSyncRow>();
   return results;
 }
 

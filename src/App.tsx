@@ -14,7 +14,9 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import {
   changePassword,
+  deleteUser,
   fetchBootstrap,
+  fetchMatchPredictions,
   login,
   logout,
   register,
@@ -27,7 +29,8 @@ import {
   syncResults,
   syncSquads,
   updateProfile,
-  type BootstrapData
+  type BootstrapData,
+  type VisiblePrediction
 } from "./client/api";
 import { isPredictionLocked } from "./domain/scoring";
 import type { Match, SquadPlayer, Team } from "./shared/types";
@@ -49,6 +52,9 @@ export function App() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [pullStartY, setPullStartY] = useState<number | null>(null);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     void refresh();
@@ -59,10 +65,15 @@ export function App() {
     setScores((current) => {
       const next = { ...current };
       for (const match of data.matches) {
-        if (!next[match.id]) {
+        if (match.myPrediction) {
           next[match.id] = {
-            home: match.myPrediction?.homeScore ?? 0,
-            away: match.myPrediction?.awayScore ?? 0
+            home: match.myPrediction.homeScore,
+            away: match.myPrediction.awayScore
+          };
+        } else if (!next[match.id]) {
+          next[match.id] = {
+            home: 0,
+            away: 0
           };
         }
       }
@@ -70,18 +81,52 @@ export function App() {
     });
   }, [data]);
 
-  async function refresh() {
-    setLoading(true);
+  async function refresh(options: { silent?: boolean; preserveDataOnError?: boolean } = {}) {
+    if (!options.silent) setLoading(true);
     setLoadError(null);
     try {
       const bootstrap = await fetchBootstrap();
       setData(bootstrap);
     } catch (error) {
-      setData(null);
-      setLoadError(error instanceof Error ? error.message : "No se pudo cargar Porra Fortilin.");
+      const message = error instanceof Error ? error.message : "No se pudo cargar Porra Fortilin.";
+      if (options.preserveDataOnError) {
+        setNotice(message);
+      } else {
+        setData(null);
+        setLoadError(message);
+      }
     } finally {
-      setLoading(false);
+      if (!options.silent) setLoading(false);
     }
+  }
+
+  async function handlePullRefresh() {
+    if (refreshing) return;
+    setRefreshing(true);
+    try {
+      await refresh({ silent: true, preserveDataOnError: true });
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  function handleTouchStart(event: React.TouchEvent<HTMLElement>) {
+    if (event.currentTarget.scrollTop <= 0) {
+      setPullStartY(event.touches[0]?.clientY ?? null);
+      setPullDistance(0);
+    }
+  }
+
+  function handleTouchMove(event: React.TouchEvent<HTMLElement>) {
+    if (pullStartY === null || event.currentTarget.scrollTop > 0) return;
+    const currentY = event.touches[0]?.clientY ?? pullStartY;
+    setPullDistance(Math.max(0, Math.min(120, currentY - pullStartY)));
+  }
+
+  function handleTouchEnd() {
+    if (pullDistance > 80) void handlePullRefresh();
+    setPullStartY(null);
+    setPullDistance(0);
   }
 
   async function handleSave(match: Match) {
@@ -130,8 +175,19 @@ export function App() {
   const nextMatch = currentMatch ?? data.nextMatch ?? editableNext;
 
   return (
-    <main className="app-shell">
+    <main
+      className="app-shell"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+    >
       <div className="stadium-bg" />
+      {(pullDistance > 0 || refreshing) ? (
+        <div className={`pull-refresh ${refreshing ? "active" : ""}`} style={{ transform: `translateY(${Math.min(pullDistance, 56)}px)` }}>
+          {refreshing ? "Actualizando..." : pullDistance > 80 ? "Suelta para actualizar" : "Desliza para actualizar"}
+        </div>
+      ) : null}
       <div className="content">
         <Header data={appData} onProfile={() => setTab("profile")} />
         {notice ? <button className="notice" type="button" onClick={() => setNotice(null)}>{notice}</button> : null}
@@ -144,16 +200,23 @@ export function App() {
             scores={scores}
             setScores={setScores}
             onSave={handleSave}
+            refreshKey={data.now}
             onOpenMatches={() => setTab("matches")}
             onOpenLeaderboard={() => setTab("leaderboard")}
           />
         ) : null}
         {tab === "matches" ? (
-          <MatchesView data={appData} scores={scores} setScores={setScores} onSave={handleSave} />
+          <MatchesView data={appData} scores={scores} setScores={setScores} onSave={handleSave} refreshKey={data.now} />
         ) : null}
         {tab === "leaderboard" ? <LeaderboardView data={appData} /> : null}
         {tab === "bonus" ? <BonusView data={appData} /> : null}
-        {tab === "profile" ? <ProfileView data={appData} onRefresh={refresh} onNotice={setNotice} /> : null}
+        {tab === "profile" ? (
+          <ProfileView
+            data={appData}
+            onRefresh={() => refresh({ silent: true, preserveDataOnError: true })}
+            onNotice={setNotice}
+          />
+        ) : null}
       </div>
       <BottomNav active={tab} onChange={setTab} />
     </main>
@@ -187,6 +250,7 @@ function HomeView({
   scores,
   setScores,
   onSave,
+  refreshKey,
   onOpenMatches,
   onOpenLeaderboard
 }: {
@@ -196,6 +260,7 @@ function HomeView({
   scores: ScoreDraft;
   setScores: (setter: (current: ScoreDraft) => ScoreDraft) => void;
   onSave: (match: Match) => void;
+  refreshKey: string;
   onOpenMatches: () => void;
   onOpenLeaderboard: () => void;
 }) {
@@ -205,7 +270,7 @@ function HomeView({
     <>
       {nextMatch ? <NextMatchHero match={nextMatch} /> : null}
       {editableMatch ? (
-        <PredictionCard match={editableMatch} scores={scores} setScores={setScores} onSave={onSave} featured />
+        <PredictionCard match={editableMatch} scores={scores} setScores={setScores} onSave={onSave} refreshKey={refreshKey} featured />
       ) : null}
       <section className="two-column">
         <LeaderboardCard rows={data.leaderboard.slice(0, 5)} onOpen={onOpenLeaderboard} />
@@ -245,12 +310,14 @@ function PredictionCard({
   scores,
   setScores,
   onSave,
+  refreshKey,
   featured = false
 }: {
   match: Match;
   scores: ScoreDraft;
   setScores: (setter: (current: ScoreDraft) => ScoreDraft) => void;
   onSave: (match: Match) => void;
+  refreshKey: string;
   featured?: boolean;
 }) {
   const locked = isPredictionLocked(match.kickoffAt) || match.status === "finished";
@@ -290,6 +357,7 @@ function PredictionCard({
         <p className="live-score-line">{matchStatusLabel(match)} · Resultado actual: {match.homeScore} - {match.awayScore}</p>
       ) : null}
       <MatchGoals match={match} />
+      <VisiblePredictions match={match} refreshKey={refreshKey} />
       <div className="card-actions">
         {match.isDoublePoints ? <span className="double-chip">Puntos x2</span> : <span />}
         <button className="save-button" type="button" disabled={locked} onClick={() => onSave(match)}>
@@ -302,13 +370,71 @@ function PredictionCard({
 
 function MatchGoals({ match, compact = false }: { match: Match; compact?: boolean }) {
   if (!match.goals || match.goals.length === 0) return null;
+  let previousHome = 0;
+  let previousAway = 0;
+  const goals = match.goals.map((goal) => {
+    const side = goal.homeScore > previousHome ? "home" : goal.awayScore > previousAway ? "away" : "unknown";
+    previousHome = goal.homeScore;
+    previousAway = goal.awayScore;
+    return { ...goal, side };
+  });
 
   return (
     <div className={`goal-list ${compact ? "compact-goals" : ""}`}>
-      {match.goals.map((goal, index) => (
-        <span key={`${match.id}-goal-${index}`}>
+      {goals.map((goal, index) => (
+        <span className={`goal-item ${goal.side}`} key={`${match.id}-goal-${index}`}>
           {goal.minute ? `${goal.minute}' ` : ""}
           {formatGoal(goal)} · {goal.homeScore}-{goal.awayScore}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function VisiblePredictions({ match, refreshKey }: { match: Match; refreshKey: string }) {
+  const [predictions, setPredictions] = useState<VisiblePrediction[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const locked = isPredictionLocked(match.kickoffAt) || match.status === "finished";
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!locked) {
+      setPredictions([]);
+      setError(null);
+      return;
+    }
+
+    fetchMatchPredictions(match.id)
+      .then((rows) => {
+        if (!cancelled) {
+          setPredictions(rows);
+          setError(null);
+        }
+      })
+      .catch((apiError) => {
+        if (!cancelled) {
+          setPredictions([]);
+          setError(apiError instanceof Error ? apiError.message : "No se pudieron cargar pronósticos.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [locked, match.id, refreshKey]);
+
+  if (!locked) return null;
+  if (error) return <p className="visible-predictions muted">{error}</p>;
+  if (predictions.length === 0) return <p className="visible-predictions muted">Aún no hay pronósticos visibles.</p>;
+
+  return (
+    <div className="visible-predictions">
+      <strong>Pronósticos visibles</strong>
+      {predictions.map((prediction) => (
+        <span key={`${match.id}-${prediction.displayName}`}>
+          <b>{prediction.displayName}</b>
+          <em>{prediction.homeScore} - {prediction.awayScore}</em>
+          <small>{prediction.points} pts</small>
         </span>
       ))}
     </div>
@@ -329,12 +455,14 @@ function MatchesView({
   data,
   scores,
   setScores,
-  onSave
+  onSave,
+  refreshKey
 }: {
   data: BootstrapData;
   scores: ScoreDraft;
   setScores: (setter: (current: ScoreDraft) => ScoreDraft) => void;
   onSave: (match: Match) => void;
+  refreshKey: string;
 }) {
   const [matchday, setMatchday] = useState<number | "all">("all");
   const matches = matchday === "all" ? data.matches : data.matches.filter((match) => match.matchday === matchday);
@@ -353,7 +481,7 @@ function MatchesView({
         ))}
       </div>
       {matches.map((match) => (
-        <PredictionCard key={match.id} match={match} scores={scores} setScores={setScores} onSave={onSave} />
+        <PredictionCard key={match.id} match={match} scores={scores} setScores={setScores} onSave={onSave} refreshKey={refreshKey} />
       ))}
     </section>
   );
@@ -408,14 +536,14 @@ function BonusView({ data }: { data: BootstrapData }) {
         )}
       </div>
       <div className="rules-card">
-        <strong>Reglas de puntuacion</strong>
+        <strong>Reglas de puntuación</strong>
         <ul>
           <li>Resultado exacto: 3 puntos.</li>
           <li>Tendencia: 1 punto si aciertas ganador o empate aunque falle el marcador.</li>
           <li>Fallo: 0 puntos.</li>
-          <li>Los partidos marcados como x2 duplican los puntos del pronostico.</li>
-          <li>Bonus bloqueados al crear usuario: campeon +10, subcampeon +5 y maximo goleador +5.</li>
-          <li>El maximo goleador se valida contra OpenLigaDB y se normaliza con la convocatoria cargada.</li>
+          <li>Los partidos marcados como x2 duplican los puntos del pronóstico.</li>
+          <li>Bonus bloqueados al crear usuario: campeón +10, subcampeón +5 y máximo goleador +5.</li>
+          <li>El máximo goleador se valida contra OpenLigaDB y se normaliza con la convocatoria cargada.</li>
         </ul>
       </div>
     </section>
@@ -525,10 +653,13 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
   const users = data.adminUsers ?? [];
   const [targetUserId, setTargetUserId] = useState(users[0]?.id ?? "");
   const [newPassword, setNewPassword] = useState("");
+  const [adminMessage, setAdminMessage] = useState<string | null>(null);
   const [userHome, setUserHome] = useState(0);
   const [userAway, setUserAway] = useState(0);
   const match = data.matches.find((candidate) => candidate.id === matchId);
   const targetUser = users.find((item) => item.id === targetUserId) ?? null;
+  const targetPrediction =
+    data.adminPredictions?.find((prediction) => prediction.userId === targetUserId && prediction.matchId === matchId) ?? null;
   const defaultChampionId = data.teams[0]?.id ?? null;
   const defaultRunnerUpId = firstDifferentTeam(data.teams, defaultChampionId)?.id ?? null;
   const defaultScorerTeamId = firstTeamWithPlayers(data.teams, data.squadPlayers)?.id ?? data.teams[0]?.id ?? null;
@@ -551,6 +682,16 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
   }, [targetUserId, users]);
 
   useEffect(() => {
+    setHome(match?.homeScore ?? 0);
+    setAway(match?.awayScore ?? 0);
+  }, [matchId, match?.homeScore, match?.awayScore]);
+
+  useEffect(() => {
+    setUserHome(targetPrediction?.homeScore ?? 0);
+    setUserAway(targetPrediction?.awayScore ?? 0);
+  }, [targetUserId, matchId, targetPrediction?.homeScore, targetPrediction?.awayScore]);
+
+  useEffect(() => {
     const bonus = targetUser?.bonus;
     const championId = bonus?.championTeamId ?? defaultChampionId;
     const runnerUpId = bonus?.runnerUpTeamId ?? firstDifferentTeam(data.teams, championId)?.id ?? defaultRunnerUpId;
@@ -563,22 +704,24 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
   }, [targetUserId, targetUser?.bonus, data.teams, data.squadPlayers, defaultChampionId, defaultRunnerUpId, defaultScorerTeamId, defaultScorerPlayerId]);
 
   async function handleSquadSync() {
+    setAdminMessage(null);
     try {
       const result = await syncSquads();
-      onNotice(`${result.message} Requests usados: ${result.requestsUsed}.`);
+      setAdminMessage(`${result.message} Requests usados: ${result.requestsUsed}.`);
       await onRefresh();
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "No se pudieron cargar convocatorias.");
+      setAdminMessage(error instanceof Error ? error.message : "No se pudieron cargar convocatorias.");
     }
   }
 
   async function handleResultSync() {
+    setAdminMessage(null);
     try {
       const result = await syncResults();
-      onNotice(`${result.message} Requests usados: ${result.requestsUsed}.`);
+      setAdminMessage(`${result.message} Requests usados: ${result.requestsUsed}.`);
       await onRefresh();
     } catch (error) {
-      onNotice(error instanceof Error ? error.message : "No se pudieron sincronizar resultados.");
+      setAdminMessage(error instanceof Error ? error.message : "No se pudieron sincronizar resultados.");
     }
   }
 
@@ -620,6 +763,24 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
       await onRefresh();
     } catch (error) {
       onNotice(error instanceof Error ? error.message : "No se pudo resetear.");
+    }
+  }
+
+  async function handleDeleteUser() {
+    if (!targetUser) {
+      onNotice("Selecciona un usuario.");
+      return;
+    }
+
+    const confirmed = window.confirm(`¿Eliminar a ${targetUser.displayName} (${targetUser.username})? Se borrarán sus pronósticos, bonus y sesiones.`);
+    if (!confirmed) return;
+
+    try {
+      await deleteUser(targetUser.id);
+      onNotice("Usuario eliminado.");
+      await onRefresh();
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "No se pudo eliminar el usuario.");
     }
   }
 
@@ -677,6 +838,7 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
         <button type="button" className="ghost-button" onClick={handleSquadSync}>Cargar convocatorias</button>
         <button type="button" className="ghost-button" onClick={handleResultSync}>Sincronizar resultados</button>
       </div>
+      {adminMessage ? <button className="admin-message" type="button" onClick={() => setAdminMessage(null)}>{adminMessage}</button> : null}
       <section className="admin-section">
         <div className="admin-section-head">
           <strong>Editar partidos</strong>
@@ -727,6 +889,7 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
           />
           <button type="button" className="ghost-button" onClick={handlePasswordReset}>Resetear</button>
         </div>
+        <button type="button" className="danger-button wide" disabled={!targetUser} onClick={handleDeleteUser}>Eliminar usuario</button>
         <small className="admin-subtitle">Pronóstico del participante</small>
         <div className="admin-score">
           <input type="number" min={0} value={userHome} onChange={(event) => setUserHome(Number(event.target.value))} />
