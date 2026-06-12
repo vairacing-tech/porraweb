@@ -1,4 +1,4 @@
-import { clearSessionCookie, createSession, getAuthUser, loginUser, registerUser, sessionCookie } from "./auth";
+import { clearSessionCookie, createSession, getAuthUser, loginUser, sessionCookie } from "./auth";
 import {
   createBonus,
   deleteUserAsAdmin,
@@ -50,24 +50,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     if (method === "OPTIONS") return new Response(null, { status: 204 });
 
     if (segments[0] === "auth" && segments[1] === "register" && method === "POST") {
-      const body = await readJson<RegisterBody>(request);
-      const created = await registerUser(env, {
-        username: requireString(body.username, "username"),
-        displayName: requireString(body.displayName, "displayName"),
-        password: requireString(body.password, "password")
-      });
-
-      if (body.bonus) {
-        await createBonus(env, created.id, {
-          championTeamId: body.bonus.championTeamId ?? null,
-          runnerUpTeamId: body.bonus.runnerUpTeamId ?? null,
-          topScorerTeamId: body.bonus.topScorerTeamId ?? null,
-          topScorerPlayerId: body.bonus.topScorerPlayerId ?? null
-        });
-      }
-
-      const session = await createSession(env, created.id);
-      return withSession(json({ user: created }, { status: 201 }), session.id, session.expiresAt);
+      throw new HttpError(403, "El registro de nuevos usuarios esta cerrado.");
     }
 
     if (segments[0] === "auth" && segments[1] === "login" && method === "POST") {

@@ -24,7 +24,6 @@ import {
   fetchUserSummary,
   login,
   logout,
-  register,
   resetUserPassword,
   savePrediction,
   setDoublePoints,
@@ -1169,58 +1168,18 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
   );
 }
 
-function AuthScreen({ data, onDone }: { data: BootstrapData; onDone: () => Promise<void> }) {
-  const [mode, setMode] = useState<"login" | "register">("register");
+function AuthScreen({ onDone }: { data: BootstrapData; onDone: () => Promise<void> }) {
   const [message, setMessage] = useState<string | null>(null);
-  const initialChampionId = data.teams[0]?.id ?? null;
-  const initialRunnerUpId = firstDifferentTeam(data.teams, initialChampionId)?.id ?? null;
-  const initialScorerTeamId = firstTeamWithPlayers(data.teams, data.squadPlayers)?.id ?? data.teams[0]?.id ?? null;
-  const initialScorerPlayerId = firstPlayerForTeam(data.squadPlayers, initialScorerTeamId)?.apiPlayerId ?? null;
   const [form, setForm] = useState({
     username: "",
-    displayName: "",
-    password: "",
-    championTeamId: initialChampionId,
-    runnerUpTeamId: initialRunnerUpId,
-    topScorerTeamId: initialScorerTeamId,
-    topScorerPlayerId: initialScorerPlayerId
+    password: ""
   });
-  const runnerUpTeams = useMemo(
-    () => data.teams.filter((team) => team.id !== form.championTeamId),
-    [data.teams, form.championTeamId]
-  );
-  const scorerPlayers = useMemo(
-    () => data.squadPlayers.filter((player) => player.teamId === form.topScorerTeamId),
-    [data.squadPlayers, form.topScorerTeamId]
-  );
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
-    if (mode === "register" && form.championTeamId === form.runnerUpTeamId) {
-      setMessage("Campeón y subcampeón no pueden ser la misma selección.");
-      return;
-    }
-    if (mode === "register" && (!form.topScorerTeamId || !form.topScorerPlayerId)) {
-      setMessage("Elige primero la selección del goleador y luego un jugador de la convocatoria.");
-      return;
-    }
     try {
-      if (mode === "login") {
-        await login(form.username, form.password);
-      } else {
-        await register({
-          username: form.username,
-          displayName: form.displayName || form.username,
-          password: form.password,
-          bonus: {
-            championTeamId: form.championTeamId,
-            runnerUpTeamId: form.runnerUpTeamId,
-            topScorerTeamId: form.topScorerTeamId,
-            topScorerPlayerId: form.topScorerPlayerId
-          }
-        });
-      }
+      await login(form.username, form.password);
       await onDone();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo continuar.");
@@ -1238,55 +1197,11 @@ function AuthScreen({ data, onDone }: { data: BootstrapData; onDone: () => Promi
             <strong>Fortilin</strong>
           </div>
         </div>
-        <div className="segmented auth-tabs">
-          <button type="button" className={mode === "login" ? "active" : ""} onClick={() => setMode("login")}>Entrar</button>
-          <button type="button" className={mode === "register" ? "active" : ""} onClick={() => setMode("register")}>Crear</button>
-        </div>
         <form onSubmit={submit} className="auth-form">
           <input placeholder="Usuario" value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} />
-          {mode === "register" ? (
-            <>
-              <input placeholder="Nombre visible" value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} />
-            </>
-          ) : null}
           <input placeholder="Contraseña" type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} />
-          {mode === "register" ? (
-            <>
-              <SelectTeam
-                label="Campeón"
-                teams={data.teams}
-                value={form.championTeamId}
-                onChange={(value) =>
-                  setForm((current) => ({
-                    ...current,
-                    championTeamId: value,
-                    runnerUpTeamId: current.runnerUpTeamId === value ? firstDifferentTeam(data.teams, value)?.id ?? null : current.runnerUpTeamId
-                  }))
-                }
-              />
-              <SelectTeam label="Subcampeón" teams={runnerUpTeams} value={form.runnerUpTeamId} onChange={(value) => setForm({ ...form, runnerUpTeamId: value })} />
-              <SelectTeam
-                label="Selección del máximo goleador"
-                teams={data.teams}
-                value={form.topScorerTeamId}
-                onChange={(value) => {
-                  const player = firstPlayerForTeam(data.squadPlayers, value);
-                  setForm({ ...form, topScorerTeamId: value, topScorerPlayerId: player?.apiPlayerId ?? null });
-                }}
-              />
-              <SelectPlayer
-                label="Máximo goleador"
-                players={scorerPlayers}
-                value={form.topScorerPlayerId}
-                onChange={(value) => setForm({ ...form, topScorerPlayerId: value })}
-              />
-              {scorerPlayers.length === 0 ? (
-                <p className="form-hint">Convocatoria pendiente de cargar por el admin.</p>
-              ) : null}
-            </>
-          ) : null}
           {message ? <p className="form-error">{message}</p> : null}
-          <button className="save-button wide" type="submit">{mode === "login" ? "Entrar" : "Crear usuario"}</button>
+          <button className="save-button wide" type="submit">Entrar</button>
         </form>
       </div>
     </main>
