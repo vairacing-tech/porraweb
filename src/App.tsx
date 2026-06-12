@@ -1473,11 +1473,13 @@ function findCurrentMatch<T extends Match>(matches: T[], now = new Date()): T | 
   );
 }
 
-function getRelevantMatches<T extends Match>(matches: T[]): T[] {
+function getRelevantMatches<T extends Match>(matches: T[], now = new Date()): T[] {
   const sorted = sortMatchesByKickoff(matches);
-  const current = findCurrentMatch(sorted);
-  if (!current) return sorted;
-  return [current, ...sorted.filter((match) => match.id !== current.id)];
+  const current = findCurrentMatch(sorted, now);
+  const nowMs = now.getTime();
+  const upcoming = sorted.filter((match) => match.status !== "finished" && new Date(match.kickoffAt).getTime() >= nowMs);
+  if (!current) return upcoming;
+  return [current, ...upcoming.filter((match) => match.id !== current.id)];
 }
 
 function getMissingUpcomingPredictions(matches: Match[], now = new Date()): Match[] {
