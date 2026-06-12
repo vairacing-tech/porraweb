@@ -36,7 +36,7 @@ export async function getAuthUser(env: Env, request: Request): Promise<AuthUser 
   if (!sessionId) return null;
 
   const row = await env.DB.prepare(
-    `SELECT u.id, u.username, u.display_name, u.is_admin, lm.league_id, s.expires_at
+    `SELECT u.id, u.username, u.display_name, u.avatar_url, u.is_admin, lm.league_id, s.expires_at
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      LEFT JOIN league_members lm ON lm.user_id = u.id
@@ -48,6 +48,7 @@ export async function getAuthUser(env: Env, request: Request): Promise<AuthUser 
       id: string;
       username: string;
       display_name: string;
+      avatar_url: string | null;
       is_admin: number;
       league_id: string | null;
       expires_at: string;
@@ -64,6 +65,7 @@ export async function getAuthUser(env: Env, request: Request): Promise<AuthUser 
     id: row.id,
     username: row.username,
     displayName: row.display_name,
+    avatarUrl: row.avatar_url,
     isAdmin: row.is_admin === 1,
     leagueId: row.league_id ?? "fortilin"
   };
@@ -98,6 +100,7 @@ export async function registerUser(env: Env, input: {
     id: userId,
     username,
     displayName: input.displayName,
+    avatarUrl: null,
     isAdmin: false,
     leagueId: "fortilin"
   };
@@ -105,7 +108,7 @@ export async function registerUser(env: Env, input: {
 
 export async function loginUser(env: Env, username: string, password: string): Promise<AuthUser> {
   const row = await env.DB.prepare(
-    `SELECT u.id, u.username, u.display_name, u.password_hash, u.password_salt, u.is_admin, lm.league_id
+    `SELECT u.id, u.username, u.display_name, u.avatar_url, u.password_hash, u.password_salt, u.is_admin, lm.league_id
      FROM users u
      LEFT JOIN league_members lm ON lm.user_id = u.id
      WHERE u.username = ?1
@@ -116,6 +119,7 @@ export async function loginUser(env: Env, username: string, password: string): P
       id: string;
       username: string;
       display_name: string;
+      avatar_url: string | null;
       password_hash: string;
       password_salt: string;
       is_admin: number;
@@ -130,6 +134,7 @@ export async function loginUser(env: Env, username: string, password: string): P
     id: row.id,
     username: row.username,
     displayName: row.display_name,
+    avatarUrl: row.avatar_url,
     isAdmin: row.is_admin === 1,
     leagueId: row.league_id ?? "fortilin"
   };

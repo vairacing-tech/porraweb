@@ -52,6 +52,36 @@ export type OpenLigaDbGoalGetter = {
   goalCount: number;
 };
 
+export type OpenLigaDbStanding = {
+  teamInfoId: number;
+  teamName: string;
+  shortName?: string | null;
+  teamIconUrl?: string | null;
+  points: number;
+  opponentGoals: number;
+  goals: number;
+  matches: number;
+  won: number;
+  lost: number;
+  draw: number;
+  goalDiff: number;
+};
+
+export type ParsedOpenLigaDbStanding = {
+  providerTeamId: number;
+  providerTeamName: string;
+  shortCode: string | null;
+  logoUrl: string | null;
+  points: number;
+  goalsAgainst: number;
+  goalsFor: number;
+  played: number;
+  won: number;
+  lost: number;
+  drawn: number;
+  goalDiff: number;
+};
+
 export type ParsedOpenLigaDbMatch = {
   providerMatchId: number;
   kickoffAt: string;
@@ -117,6 +147,13 @@ export async function fetchOpenLigaDbTeams(env: Env): Promise<OpenLigaDbTeam[]> 
   return fetchJson<OpenLigaDbTeam[]>(`${config.baseUrl}/getavailableteams/${config.leagueShortcut}/${config.season}`);
 }
 
+export async function fetchOpenLigaDbStandings(env: Env): Promise<OpenLigaDbStanding[]> {
+  const config = getOpenLigaDbConfig(env);
+  if (!config) return [];
+
+  return fetchJson<OpenLigaDbStanding[]>(`${config.baseUrl}/getbltable/${config.leagueShortcut}/${config.season}`);
+}
+
 export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMatch {
   const kickoffAt = normalizeKickoff(match.matchDateTimeUTC || match.matchDateTime);
   const finalResult = selectFinalResult(match.matchResults || []);
@@ -135,6 +172,23 @@ export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMa
     homeScore: finalResult?.pointsTeam1 ?? null,
     awayScore: finalResult?.pointsTeam2 ?? null,
     goals: parseGoals(match.goals || [])
+  };
+}
+
+export function parseOpenLigaDbStanding(row: OpenLigaDbStanding): ParsedOpenLigaDbStanding {
+  return {
+    providerTeamId: row.teamInfoId,
+    providerTeamName: row.teamName,
+    shortCode: row.shortName || null,
+    logoUrl: normalizeLogoUrl(row.teamIconUrl),
+    points: numberOrZero(row.points),
+    goalsAgainst: numberOrZero(row.opponentGoals),
+    goalsFor: numberOrZero(row.goals),
+    played: numberOrZero(row.matches),
+    won: numberOrZero(row.won),
+    lost: numberOrZero(row.lost),
+    drawn: numberOrZero(row.draw),
+    goalDiff: numberOrZero(row.goalDiff)
   };
 }
 
@@ -221,6 +275,10 @@ function getLiveWindowMs(match: OpenLigaDbMatch): number {
   const groupStageWindow = 270 * 60 * 1000;
   const knockoutWindow = 330 * 60 * 1000;
   return groupOrder > 0 && groupOrder <= 3 ? groupStageWindow : knockoutWindow;
+}
+
+function numberOrZero(value: number | null | undefined): number {
+  return Number.isFinite(value) ? Number(value) : 0;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {

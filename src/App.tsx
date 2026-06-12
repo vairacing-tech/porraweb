@@ -1,5 +1,7 @@
 import {
+  AlertTriangle,
   CalendarDays,
+  Clock,
   Gift,
   Home,
   ListChecks,
@@ -8,8 +10,10 @@ import {
   Medal,
   Save,
   Shield,
+  Table2,
   Trophy,
-  User
+  User,
+  X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -17,6 +21,7 @@ import {
   deleteUser,
   fetchBootstrap,
   fetchMatchPredictions,
+  fetchUserSummary,
   login,
   logout,
   register,
@@ -28,16 +33,22 @@ import {
   setUserPrediction,
   syncResults,
   syncSquads,
+  updateAvatar,
   updateProfile,
   type BootstrapData,
+  type UserClosedSummary,
   type VisiblePrediction
 } from "./client/api";
 import { isPredictionLocked } from "./domain/scoring";
 import type { Match, SquadPlayer, Team } from "./shared/types";
 
-type Tab = "home" | "matches" | "leaderboard" | "bonus" | "profile";
+type Tab = "home" | "matches" | "leaderboard" | "world" | "bonus" | "profile";
 
 type ScoreDraft = Record<string, { home: number; away: number }>;
+
+type MyPrediction = { id: string; homeScore: number; awayScore: number; points: number; outcome: string };
+
+type MatchFilter = "all" | "knockout" | `matchday-${number}`;
 
 type ScorerRow = {
   player: string;
@@ -55,10 +66,17 @@ export function App() {
   const [pullStartY, setPullStartY] = useState<number | null>(null);
   const [pullDistance, setPullDistance] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
 
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    if (!notice) return;
+    const timeoutId = window.setTimeout(() => setNotice(null), 3500);
+    return () => window.clearTimeout(timeoutId);
+  }, [notice]);
 
   useEffect(() => {
     if (!data) return;
@@ -203,12 +221,14 @@ export function App() {
             refreshKey={data.now}
             onOpenMatches={() => setTab("matches")}
             onOpenLeaderboard={() => setTab("leaderboard")}
+            onSelectUser={setSelectedUserId}
           />
         ) : null}
         {tab === "matches" ? (
           <MatchesView data={appData} scores={scores} setScores={setScores} onSave={handleSave} refreshKey={data.now} />
         ) : null}
-        {tab === "leaderboard" ? <LeaderboardView data={appData} /> : null}
+        {tab === "leaderboard" ? <LeaderboardView data={appData} onSelectUser={setSelectedUserId} /> : null}
+        {tab === "world" ? <WorldStandingsView data={appData} /> : null}
         {tab === "bonus" ? <BonusView data={appData} /> : null}
         {tab === "profile" ? (
           <ProfileView
@@ -219,6 +239,7 @@ export function App() {
         ) : null}
       </div>
       <BottomNav active={tab} onChange={setTab} />
+      {selectedUserId ? <UserSummaryModal userId={selectedUserId} data={appData} onClose={() => setSelectedUserId(null)} /> : null}
     </main>
   );
 }
@@ -236,7 +257,7 @@ function Header({ data, onProfile }: { data: BootstrapData; onProfile: () => voi
         </div>
       </div>
       <button className="profile-dot" type="button" title={data.user?.displayName} onClick={onProfile} aria-label="Editar perfil">
-        <span>{initials(data.user?.displayName || "PF")}</span>
+        <UserAvatar name={data.user?.displayName || "PF"} avatarUrl={data.user?.avatarUrl ?? null} />
         <i />
       </button>
     </header>
@@ -252,7 +273,8 @@ function HomeView({
   onSave,
   refreshKey,
   onOpenMatches,
-  onOpenLeaderboard
+  onOpenLeaderboard,
+  onSelectUser
 }: {
   data: BootstrapData;
   nextMatch: Match | null;
@@ -263,17 +285,20 @@ function HomeView({
   refreshKey: string;
   onOpenMatches: () => void;
   onOpenLeaderboard: () => void;
+  onSelectUser: (userId: string) => void;
 }) {
   const todayMatches = useMemo(() => getRelevantMatches(data.matches).slice(0, 4), [data.matches]);
+  const missingUpcoming = useMemo(() => getMissingUpcomingPredictions(data.matches), [data.matches]);
 
   return (
     <>
       {nextMatch ? <NextMatchHero match={nextMatch} /> : null}
+      {missingUpcoming.length > 0 ? <UpcomingPredictionAlert matches={missingUpcoming} onOpen={onOpenMatches} /> : null}
       {editableMatch ? (
         <PredictionCard match={editableMatch} scores={scores} setScores={setScores} onSave={onSave} refreshKey={refreshKey} featured />
       ) : null}
       <section className="two-column">
-        <LeaderboardCard rows={data.leaderboard.slice(0, 5)} onOpen={onOpenLeaderboard} />
+        <LeaderboardCard rows={data.leaderboard.slice(0, 6)} onOpen={onOpenLeaderboard} onSelect={onSelectUser} />
         <TodayCard matches={todayMatches} onOpen={onOpenMatches} />
       </section>
     </>
@@ -300,8 +325,40 @@ function NextMatchHero({ match }: { match: Match }) {
         <span><CalendarDays size={15} /> {formatDate(match.kickoffAt)}</span>
         <span>{formatTime(match.kickoffAt)} Madrid</span>
       </div>
+      <LockCountdown match={match} />
       <a className="hero-cta" href="#pronostico">Haz tu pronóstico</a>
     </section>
+  );
+}
+
+function UpcomingPredictionAlert({ matches, onOpen }: { matches: Match[]; onOpen: () => void }) {
+  const lockedCount = matches.filter((match) => isPredictionLocked(match.kickoffAt)).length;
+  return (
+    <button className="prediction-alert" type="button" onClick={onOpen}>
+      <AlertTriangle size={18} />
+      <span>
+        Te faltan {matches.length} pronóstico{matches.length === 1 ? "" : "s"} de las próximas 24 h.
+        {lockedCount > 0 ? ` ${lockedCount} ya bloqueado${lockedCount === 1 ? "" : "s"}.` : ""}
+      </span>
+    </button>
+  );
+}
+
+function LockCountdown({ match }: { match: Match }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  const lockTime = new Date(match.lockAt).getTime();
+  const remaining = lockTime - now;
+  return (
+    <div className={`lock-countdown ${remaining <= 0 ? "locked" : ""}`}>
+      <Clock size={15} />
+      <span>{remaining <= 0 ? "Pronóstico bloqueado" : `Bloquea en ${formatDuration(remaining)}`}</span>
+    </div>
   );
 }
 
@@ -322,6 +379,7 @@ function PredictionCard({
 }) {
   const locked = isPredictionLocked(match.kickoffAt) || match.status === "finished";
   const draft = scores[match.id] ?? { home: 0, away: 0 };
+  const savedPrediction = getMyPrediction(match);
 
   function change(side: "home" | "away", delta: number) {
     setScores((current) => {
@@ -341,6 +399,9 @@ function PredictionCard({
       <div className="section-title">
         <ListChecks size={18} />
         <span>Haz tu pronóstico</span>
+        <b className={`prediction-chip ${savedPrediction ? "saved" : locked ? "missed" : "pending"}`}>
+          {savedPrediction ? "Guardado" : locked ? "No enviado" : "Sin guardar"}
+        </b>
         {locked ? <em><Lock size={13} /> Bloqueado</em> : <em>Bloqueo 2h antes</em>}
       </div>
       <p className="muted compact">
@@ -464,8 +525,9 @@ function MatchesView({
   onSave: (match: Match) => void;
   refreshKey: string;
 }) {
-  const [matchday, setMatchday] = useState<number | "all">("all");
-  const matches = matchday === "all" ? data.matches : data.matches.filter((match) => match.matchday === matchday);
+  const [filter, setFilter] = useState<MatchFilter>("all");
+  const filters = useMemo(() => buildMatchFilters(data.matches), [data.matches]);
+  const matches = useMemo(() => filterMatches(data.matches, filter), [data.matches, filter]);
 
   return (
     <section className="view-stack">
@@ -473,10 +535,10 @@ function MatchesView({
         <h2>Partidos</h2>
         <p>Lista compacta para pronosticar rápido.</p>
       </div>
-      <div className="segmented">
-        {(["all", 1, 2, 3] as const).map((item) => (
-          <button key={item} type="button" className={matchday === item ? "active" : ""} onClick={() => setMatchday(item)}>
-            {item === "all" ? "Todos" : `J${item}`}
+      <div className="segmented match-filters">
+        {filters.map((item) => (
+          <button key={item.value} type="button" className={filter === item.value ? "active" : ""} onClick={() => setFilter(item.value)}>
+            {item.label}
           </button>
         ))}
       </div>
@@ -487,14 +549,69 @@ function MatchesView({
   );
 }
 
-function LeaderboardView({ data }: { data: BootstrapData }) {
+function LeaderboardView({ data, onSelectUser }: { data: BootstrapData; onSelectUser: (userId: string) => void }) {
   return (
     <section className="card full-card">
       <div className="section-title">
         <Medal size={18} />
         <span>Clasificación</span>
       </div>
-      <LeaderboardRows rows={data.leaderboard} />
+      <LeaderboardRows rows={data.leaderboard} onSelect={onSelectUser} />
+    </section>
+  );
+}
+
+function WorldStandingsView({ data }: { data: BootstrapData }) {
+  const groups = useMemo(() => groupWorldStandings(data.worldStandings), [data.worldStandings]);
+  const updatedAt = data.worldStandings[0]?.updatedAt ?? null;
+
+  return (
+    <section className="view-stack">
+      <div className="view-header">
+        <h2>Clasificación Mundial</h2>
+        <p>Grupos oficiales cacheados desde OpenLigaDB.</p>
+      </div>
+      {updatedAt ? <p className="world-updated">Actualizado: {formatDate(updatedAt)} · {formatTime(updatedAt)} Madrid</p> : null}
+      {groups.length === 0 ? (
+        <div className="card full-card">
+          <p className="empty-state">La clasificación del Mundial se cargará en la próxima sincronización de OpenLigaDB.</p>
+        </div>
+      ) : null}
+      {groups.map((group) => (
+        <section className="card world-group-card" key={group.name}>
+          <div className="section-title">
+            <Table2 size={18} />
+            <span>{group.name}</span>
+          </div>
+          <div className="world-table">
+            <div className="world-head">
+              <span>#</span>
+              <span>Selección</span>
+              <span>PJ</span>
+              <span>DG</span>
+              <span>Pts</span>
+            </div>
+            {group.rows.map((row) => (
+              <div className="world-row" key={`${group.name}-${row.teamId ?? row.teamName}`}>
+                <span>{row.rank}</span>
+                <TeamBadge team={{ id: row.teamId ?? row.teamName, name: row.teamName, shortCode: row.shortCode ?? row.teamName.slice(0, 3), logoUrl: row.logoUrl }} />
+                <strong>{row.teamName}</strong>
+                <em>{row.played}</em>
+                <em>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</em>
+                <b>{row.points}</b>
+              </div>
+            ))}
+          </div>
+        </section>
+      ))}
+      <div className="rules-card">
+        <strong>Fase de grupos y eliminatorias</strong>
+        <ul>
+          <li>Esta pantalla muestra la fase de grupos desde OpenLigaDB y se actualiza con el worker.</li>
+          <li>Cuando empiecen eliminatorias, los partidos seguirán apareciendo en Partidos bajo el filtro “Elim.”.</li>
+          <li>Los pronósticos ya guardados y la clasificación de la porra no se recalculan salvo que cambie el resultado real del partido.</li>
+        </ul>
+      </div>
     </section>
   );
 }
@@ -550,6 +667,76 @@ function BonusView({ data }: { data: BootstrapData }) {
   );
 }
 
+function UserSummaryModal({ userId, data, onClose }: { userId: string; data: BootstrapData; onClose: () => void }) {
+  const [summary, setSummary] = useState<UserClosedSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const teamById = useMemo(() => new Map(data.teams.map((team) => [team.id, team])), [data.teams]);
+  const matchById = useMemo(() => new Map(data.matches.map((match) => [match.id, match])), [data.matches]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSummary(null);
+    setError(null);
+    fetchUserSummary(userId)
+      .then((result) => {
+        if (!cancelled) setSummary(result);
+      })
+      .catch((apiError) => {
+        if (!cancelled) setError(apiError instanceof Error ? apiError.message : "No se pudo cargar el participante.");
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  const bonus = summary?.bonus ?? null;
+  const scorerTeam = bonus?.topScorerTeamId ? teamById.get(bonus.topScorerTeamId)?.name : null;
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true">
+      <section className="card user-modal">
+        <div className="modal-head">
+          <div>
+            <strong>{summary?.user.displayName ?? "Participante"}</strong>
+            <span>Pronósticos cerrados y bonus</span>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Cerrar"><X size={20} /></button>
+        </div>
+        {error ? <p className="form-error">{error}</p> : null}
+        {!summary && !error ? <p className="empty-state">Cargando participante...</p> : null}
+        {summary ? (
+          <>
+            <div className="summary-block">
+              <h3>Bonus</h3>
+              <BonusLine label="Campeón" value={bonus?.championTeamId ? teamById.get(bonus.championTeamId)?.name : null} />
+              <BonusLine label="Subcampeón" value={bonus?.runnerUpTeamId ? teamById.get(bonus.runnerUpTeamId)?.name : null} />
+              <BonusLine label="Máximo goleador" value={bonus?.topScorer ? `${bonus.topScorer}${scorerTeam ? ` (${scorerTeam})` : ""}` : null} />
+              <BonusLine label="Puntos bonus" value={bonus ? `${bonus.points}` : "0"} />
+            </div>
+            <div className="summary-block">
+              <h3>Pronósticos cerrados</h3>
+              {summary.predictions.length === 0 ? <p className="empty-state">Aún no hay pronósticos cerrados visibles.</p> : null}
+              <div className="summary-predictions">
+                {summary.predictions.map((prediction) => {
+                  const match = matchById.get(prediction.matchId);
+                  return (
+                    <div className="summary-prediction-row" key={prediction.id}>
+                      <span>{match ? `${shortTeam(match.homeTeam.name)} vs ${shortTeam(match.awayTeam.name)}` : prediction.matchId}</span>
+                      <strong>{prediction.homeScore} - {prediction.awayScore}</strong>
+                      <b>{prediction.points} pts</b>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </>
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
 function ProfileView({
   data,
   onRefresh,
@@ -562,6 +749,7 @@ function ProfileView({
   const [displayName, setDisplayName] = useState(data.user?.displayName ?? "");
   const [currentPassword, setCurrentPassword] = useState("");
   const [newOwnPassword, setNewOwnPassword] = useState("");
+  const [avatarBusy, setAvatarBusy] = useState(false);
 
   useEffect(() => {
     setDisplayName(data.user?.displayName ?? "");
@@ -599,10 +787,41 @@ function ProfileView({
     }
   }
 
+  async function handleAvatarUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+
+    setAvatarBusy(true);
+    try {
+      const avatarUrl = await fileToAvatarDataUrl(file);
+      await updateAvatar(avatarUrl);
+      onNotice("Foto de perfil actualizada.");
+      await onRefresh();
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "No se pudo subir la foto.");
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function handleAvatarRemove() {
+    setAvatarBusy(true);
+    try {
+      await updateAvatar(null);
+      onNotice("Foto de perfil eliminada.");
+      await onRefresh();
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : "No se pudo eliminar la foto.");
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
   return (
     <section className="view-stack">
       <div className="card profile-card">
-        <div className="profile-avatar">{initials(data.user?.displayName || "PF")}</div>
+        <UserAvatar name={data.user?.displayName || "PF"} avatarUrl={data.user?.avatarUrl ?? null} />
         <div>
           <h2>{data.user?.displayName}</h2>
           <p>{data.user?.isAdmin ? "Administrador" : `Liga ${data.league.name}`}</p>
@@ -620,6 +839,13 @@ function ProfileView({
           <span>Nombre visible</span>
           <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} />
         </label>
+        <label className="avatar-upload">
+          <input type="file" accept="image/*" onChange={handleAvatarUpload} disabled={avatarBusy} />
+          <span>{avatarBusy ? "Procesando foto..." : "Subir foto de perfil"}</span>
+        </label>
+        {data.user?.avatarUrl ? (
+          <button type="button" className="ghost-button wide" onClick={handleAvatarRemove} disabled={avatarBusy}>Quitar foto</button>
+        ) : null}
         <button type="submit" className="save-button wide">Guardar perfil</button>
       </form>
       <form className="card profile-form" onSubmit={handleOwnPasswordSave}>
@@ -1094,7 +1320,15 @@ function SelectPlayer({
   );
 }
 
-function LeaderboardCard({ rows, onOpen }: { rows: BootstrapData["leaderboard"]; onOpen: () => void }) {
+function LeaderboardCard({
+  rows,
+  onOpen,
+  onSelect
+}: {
+  rows: BootstrapData["leaderboard"];
+  onOpen: () => void;
+  onSelect: (userId: string) => void;
+}) {
   return (
     <section className="card mini-card">
       <div className="section-title">
@@ -1102,22 +1336,31 @@ function LeaderboardCard({ rows, onOpen }: { rows: BootstrapData["leaderboard"];
         <span>Clasificación</span>
         <button type="button" onClick={onOpen}>Ver todo</button>
       </div>
-      <LeaderboardRows rows={rows} compact />
+      <LeaderboardRows rows={rows} compact onSelect={onSelect} />
     </section>
   );
 }
 
-function LeaderboardRows({ rows, compact = false }: { rows: BootstrapData["leaderboard"]; compact?: boolean }) {
+function LeaderboardRows({
+  rows,
+  compact = false,
+  onSelect
+}: {
+  rows: BootstrapData["leaderboard"];
+  compact?: boolean;
+  onSelect?: (userId: string) => void;
+}) {
   return (
     <div className={`leaderboard ${compact ? "compact-board" : ""}`}>
-      <div className="board-head"><span>Pos.</span><span>Jugador</span><span>Pts</span></div>
+      <div className="board-head"><span>Pos.</span><span /> <span>Jugador</span><span>Pts</span></div>
       {rows.length === 0 ? <p className="empty-state">Aún no hay participantes.</p> : null}
       {rows.map((row) => (
-        <div className="board-row" key={row.userId}>
+        <button className="board-row board-button" type="button" key={row.userId} onClick={() => onSelect?.(row.userId)}>
           <span className={`rank rank-${row.rank}`}>{row.rank}</span>
+          <UserAvatar name={row.displayName} avatarUrl={row.avatarUrl} small />
           <strong>{row.displayName}</strong>
           <b>{row.points}</b>
-        </div>
+        </button>
       ))}
     </div>
   );
@@ -1175,11 +1418,20 @@ function TeamBadge({ team, large = false }: { team: Team; large?: boolean }) {
   );
 }
 
+function UserAvatar({ name, avatarUrl, small = false }: { name: string; avatarUrl?: string | null; small?: boolean }) {
+  return (
+    <span className={`user-avatar ${small ? "small" : ""}`}>
+      {avatarUrl ? <img src={avatarUrl} alt="" /> : <b>{initials(name || "PF")}</b>}
+    </span>
+  );
+}
+
 function BottomNav({ active, onChange }: { active: Tab; onChange: (tab: Tab) => void }) {
   const items: Array<{ tab: Tab; label: string; icon: React.ReactNode }> = [
     { tab: "home", label: "Inicio", icon: <Home size={22} /> },
     { tab: "matches", label: "Partidos", icon: <Trophy size={22} /> },
-    { tab: "leaderboard", label: "Clasificación", icon: <Medal size={22} /> },
+    { tab: "leaderboard", label: "Clasif.", icon: <Medal size={22} /> },
+    { tab: "world", label: "Mundial", icon: <Table2 size={22} /> },
     { tab: "bonus", label: "Bonus", icon: <Gift size={22} /> },
     { tab: "profile", label: "Perfil", icon: <User size={22} /> }
   ];
@@ -1228,6 +1480,44 @@ function getRelevantMatches<T extends Match>(matches: T[]): T[] {
   return [current, ...sorted.filter((match) => match.id !== current.id)];
 }
 
+function getMissingUpcomingPredictions(matches: Match[], now = new Date()): Match[] {
+  const nowMs = now.getTime();
+  const limitMs = nowMs + 24 * 60 * 60 * 1000;
+  return sortMatchesByKickoff(matches).filter((match) => {
+    const kickoffMs = new Date(match.kickoffAt).getTime();
+    return match.status !== "finished" && kickoffMs >= nowMs && kickoffMs <= limitMs && !getMyPrediction(match);
+  });
+}
+
+function buildMatchFilters(matches: Match[]): Array<{ value: MatchFilter; label: string }> {
+  const matchdays = Array.from(
+    new Set(
+      matches
+        .filter((match) => match.stage === "GROUP" && typeof match.matchday === "number")
+        .map((match) => match.matchday as number)
+    )
+  ).sort((left, right) => left - right);
+  const hasKnockouts = matches.some((match) => match.stage !== "GROUP");
+
+  return [
+    { value: "all", label: "Todos" },
+    ...matchdays.map((matchday) => ({ value: `matchday-${matchday}` as const, label: `J${matchday}` })),
+    ...(hasKnockouts ? [{ value: "knockout" as const, label: "Elim." }] : [])
+  ];
+}
+
+function filterMatches<T extends Match>(matches: T[], filter: MatchFilter): T[] {
+  if (filter === "all") return matches;
+  if (filter === "knockout") return matches.filter((match) => match.stage !== "GROUP");
+
+  const matchday = Number(filter.replace("matchday-", ""));
+  return matches.filter((match) => match.stage === "GROUP" && match.matchday === matchday);
+}
+
+function getMyPrediction(match: Match): MyPrediction | null {
+  return (match as Match & { myPrediction?: MyPrediction | null }).myPrediction ?? null;
+}
+
 function hasScore(match: Match): boolean {
   return match.homeScore !== null && match.homeScore !== undefined && match.awayScore !== null && match.awayScore !== undefined;
 }
@@ -1248,6 +1538,38 @@ function matchSummary(match: Match): string {
 
 function formatGoal(goal: Match["goals"][number]): string {
   return [goal.scorerName || "Gol", goal.isPenalty ? "(p)" : goal.isOwnGoal ? "(pp)" : ""].filter(Boolean).join(" ");
+}
+
+function formatDuration(milliseconds: number): string {
+  const totalMinutes = Math.max(0, Math.ceil(milliseconds / 60_000));
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function groupWorldStandings(rows: BootstrapData["worldStandings"]): Array<{ name: string; rows: BootstrapData["worldStandings"] }> {
+  const groups = new Map<string, BootstrapData["worldStandings"]>();
+  for (const row of rows) {
+    const groupRows = groups.get(row.groupName) ?? [];
+    groupRows.push(row);
+    groups.set(row.groupName, groupRows);
+  }
+
+  return [...groups.entries()]
+    .sort(([left], [right]) => sortGroupName(left, right))
+    .map(([name, groupRows]) => ({
+      name,
+      rows: [...groupRows].sort((left, right) => left.rank - right.rank)
+    }));
+}
+
+function sortGroupName(left: string, right: string): number {
+  const leftLetter = left.match(/[A-Z]$/i)?.[0] ?? left;
+  const rightLetter = right.match(/[A-Z]$/i)?.[0] ?? right;
+  return leftLetter.localeCompare(rightLetter, "es", { numeric: true });
 }
 
 function getTopScorers(matches: Match[], squadPlayers: SquadPlayer[] = []): ScorerRow[] {
@@ -1340,6 +1662,45 @@ function initials(name: string): string {
 
 function clampScore(score: number): number {
   return Math.max(0, Math.min(20, score));
+}
+
+async function fileToAvatarDataUrl(file: File): Promise<string> {
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Selecciona una imagen.");
+  }
+  if (file.size > 6 * 1024 * 1024) {
+    throw new Error("La imagen no puede superar 6 MB.");
+  }
+
+  const image = await loadImage(file);
+  const size = 192;
+  const canvas = document.createElement("canvas");
+  canvas.width = size;
+  canvas.height = size;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("No se pudo procesar la imagen.");
+
+  const sourceSize = Math.min(image.naturalWidth, image.naturalHeight);
+  const sourceX = (image.naturalWidth - sourceSize) / 2;
+  const sourceY = (image.naturalHeight - sourceSize) / 2;
+  context.drawImage(image, sourceX, sourceY, sourceSize, sourceSize, 0, 0, size, size);
+  return canvas.toDataURL("image/jpeg", 0.82);
+}
+
+function loadImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(image);
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("No se pudo leer la imagen."));
+    };
+    image.src = url;
+  });
 }
 
 function firstDifferentTeam(teams: Team[], excludedId: string | null): Team | null {

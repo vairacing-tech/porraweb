@@ -1,6 +1,6 @@
 import { scorePrediction, validatePrediction } from "../domain/scoring";
 import { initialMatches, initialTeams, leagueSeed } from "../shared/fixtures";
-import type { BonusPrediction, LeaderboardRow, Match, MatchStatus, Prediction, SquadPlayer, Team } from "../shared/types";
+import type { BonusPrediction, LeaderboardRow, Match, MatchStatus, Prediction, SquadPlayer, Team, WorldStanding } from "../shared/types";
 import { createId, hashPassword, verifyPassword } from "./crypto";
 import { HttpError } from "./http";
 import type { Env } from "./types";
@@ -40,6 +40,8 @@ type MatchRow = {
 
 export async function ensureSeeded(env: Env): Promise<void> {
   const now = new Date().toISOString();
+  await ensureDerivedTables(env);
+
   await env.DB.prepare("INSERT OR IGNORE INTO leagues (id, name, slug, created_at) VALUES (?1, ?2, ?3, ?4)")
     .bind(leagueSeed.id, leagueSeed.name, leagueSeed.slug, now)
     .run();
@@ -97,6 +99,40 @@ export async function ensureSeeded(env: Env): Promise<void> {
   }
 }
 
+async function ensureDerivedTables(env: Env): Promise<void> {
+  await ensureUserAvatarColumn(env);
+  await env.DB.batch([
+    env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS world_standings (
+        team_id TEXT PRIMARY KEY,
+        provider_team_id INTEGER,
+        group_name TEXT NOT NULL,
+        rank INTEGER NOT NULL,
+        team_name TEXT NOT NULL,
+        short_code TEXT,
+        logo_url TEXT,
+        played INTEGER NOT NULL DEFAULT 0,
+        won INTEGER NOT NULL DEFAULT 0,
+        drawn INTEGER NOT NULL DEFAULT 0,
+        lost INTEGER NOT NULL DEFAULT 0,
+        goals_for INTEGER NOT NULL DEFAULT 0,
+        goals_against INTEGER NOT NULL DEFAULT 0,
+        goal_diff INTEGER NOT NULL DEFAULT 0,
+        points INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      )`
+    ),
+    env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_world_standings_group_rank ON world_standings(group_name, rank)")
+  ]);
+}
+
+async function ensureUserAvatarColumn(env: Env): Promise<void> {
+  const { results } = await env.DB.prepare("PRAGMA table_info(users)").all<{ name: string }>();
+  if (results.length === 0) return;
+  if (results.some((column) => column.name === "avatar_url")) return;
+  await env.DB.prepare("ALTER TABLE users ADD COLUMN avatar_url TEXT").run();
+}
+
 async function ensureAdminUser(env: Env, now: string): Promise<void> {
   const existing = await env.DB.prepare("SELECT id FROM users WHERE username = 'admin'").first();
   if (existing) return;
@@ -134,6 +170,49 @@ export async function getTeams(env: Env): Promise<Team[]> {
     shortCode: row.short_code,
     apiTeamId: row.api_team_id,
     logoUrl: row.logo_url
+  }));
+}
+
+export async function getWorldStandings(env: Env): Promise<WorldStanding[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT team_id, group_name, rank, team_name, short_code, logo_url,
+            played, won, drawn, lost, goals_for, goals_against, goal_diff, points, updated_at
+     FROM world_standings
+     ORDER BY group_name COLLATE NOCASE, rank ASC, team_name COLLATE NOCASE`
+  ).all<{
+    team_id: string | null;
+    group_name: string;
+    rank: number;
+    team_name: string;
+    short_code: string | null;
+    logo_url: string | null;
+    played: number;
+    won: number;
+    drawn: number;
+    lost: number;
+    goals_for: number;
+    goals_against: number;
+    goal_diff: number;
+    points: number;
+    updated_at: string;
+  }>();
+
+  return results.map((row) => ({
+    groupName: row.group_name,
+    rank: row.rank,
+    teamId: row.team_id,
+    teamName: row.team_name,
+    shortCode: row.short_code,
+    logoUrl: row.logo_url,
+    played: row.played,
+    won: row.won,
+    drawn: row.drawn,
+    lost: row.lost,
+    goalsFor: row.goals_for,
+    goalsAgainst: row.goals_against,
+    goalDiff: row.goal_diff,
+    points: row.points,
+    updatedAt: row.updated_at
   }));
 }
 
@@ -216,7 +295,7 @@ export async function savePrediction(env: Env, userId: string, matchId: string, 
 
 export async function getLeaderboard(env: Env, leagueId = "fortilin"): Promise<LeaderboardRow[]> {
   const { results } = await env.DB.prepare(
-    `SELECT u.id AS user_id, u.display_name,
+    `SELECT u.id AS user_id, u.display_name, u.avatar_url,
             COALESCE(SUM(p.points), 0) + COALESCE(MAX(b.points), 0) AS total_points,
             COALESCE(SUM(CASE WHEN p.outcome = 'exact' THEN 1 ELSE 0 END), 0) AS exacts,
             CASE WHEN COALESCE(MAX(b.points), 0) >= 10 THEN 1 ELSE 0 END AS champion_hit
@@ -225,15 +304,16 @@ export async function getLeaderboard(env: Env, leagueId = "fortilin"): Promise<L
      LEFT JOIN predictions p ON p.user_id = u.id AND p.league_id = lm.league_id
      LEFT JOIN bonus_predictions b ON b.user_id = u.id AND b.league_id = lm.league_id
      WHERE lm.league_id = ?1
-     GROUP BY u.id, u.display_name
+     GROUP BY u.id, u.display_name, u.avatar_url
      ORDER BY total_points DESC, exacts DESC, u.display_name ASC`
   )
     .bind(leagueId)
-    .all<{ user_id: string; display_name: string; total_points: number; exacts: number; champion_hit: number }>();
+    .all<{ user_id: string; display_name: string; avatar_url: string | null; total_points: number; exacts: number; champion_hit: number }>();
 
   return results.map((row, index) => ({
     userId: row.user_id,
     displayName: row.display_name,
+    avatarUrl: row.avatar_url,
     points: row.total_points,
     exacts: row.exacts,
     championHit: row.champion_hit === 1,
@@ -323,6 +403,62 @@ export async function getLeaguePredictions(env: Env, leagueId = "fortilin"): Pro
   }));
 }
 
+export async function getUserClosedSummary(env: Env, targetUserId: string, leagueId = "fortilin"): Promise<{
+  user: { id: string; username: string; displayName: string };
+  bonus: BonusPrediction | null;
+  predictions: Array<Prediction & { kickoffAt: string }>;
+}> {
+  const user = await env.DB.prepare(
+    `SELECT u.id, u.username, u.display_name
+     FROM league_members lm
+     JOIN users u ON u.id = lm.user_id
+     WHERE lm.league_id = ?1 AND lm.user_id = ?2 AND u.is_admin = 0`
+  )
+    .bind(leagueId, targetUserId)
+    .first<{ id: string; username: string; display_name: string }>();
+  if (!user) throw new HttpError(404, "Participante no encontrado.");
+
+  const bonus = await getBonus(env, targetUserId);
+  const now = new Date().toISOString();
+  const { results } = await env.DB.prepare(
+    `SELECT p.id, p.user_id, p.match_id, p.home_score, p.away_score, p.points, p.outcome, m.kickoff_at
+     FROM predictions p
+     JOIN matches m ON m.id = p.match_id
+     WHERE p.league_id = ?1 AND p.user_id = ?2 AND m.lock_at <= ?3
+     ORDER BY m.kickoff_at ASC`
+  )
+    .bind(leagueId, targetUserId, now)
+    .all<{
+      id: string;
+      user_id: string;
+      match_id: string;
+      home_score: number;
+      away_score: number;
+      points: number;
+      outcome: Prediction["outcome"];
+      kickoff_at: string;
+    }>();
+
+  return {
+    user: {
+      id: user.id,
+      username: user.username,
+      displayName: user.display_name
+    },
+    bonus,
+    predictions: results.map((row) => ({
+      id: row.id,
+      matchId: row.match_id,
+      userId: row.user_id,
+      homeScore: row.home_score,
+      awayScore: row.away_score,
+      points: row.points,
+      outcome: row.outcome,
+      kickoffAt: row.kickoff_at
+    }))
+  };
+}
+
 export async function getBonus(env: Env, userId: string): Promise<BonusPrediction | null> {
   const row = await env.DB.prepare(
     `SELECT champion_team_id, runner_up_team_id, top_scorer_team_id, top_scorer_player_id, top_scorer, points, locked_at
@@ -358,6 +494,20 @@ export async function updateUserProfile(env: Env, userId: string, input: { displ
   if (displayName.length > 40) throw new HttpError(400, "El nombre visible no puede superar 40 caracteres.");
 
   await env.DB.prepare("UPDATE users SET display_name = ?1 WHERE id = ?2").bind(displayName, userId).run();
+}
+
+export async function updateUserAvatar(env: Env, userId: string, avatarUrl: string | null): Promise<void> {
+  if (avatarUrl !== null) validateAvatarDataUrl(avatarUrl);
+  await env.DB.prepare("UPDATE users SET avatar_url = ?1 WHERE id = ?2").bind(avatarUrl, userId).run();
+}
+
+function validateAvatarDataUrl(value: string): void {
+  if (value.length > 120_000) {
+    throw new HttpError(400, "La foto es demasiado grande. Sube una imagen mas ligera.");
+  }
+  if (!/^data:image\/(?:jpeg|jpg|png|webp);base64,[a-z0-9+/=]+$/i.test(value)) {
+    throw new HttpError(400, "La foto debe ser una imagen valida.");
+  }
 }
 
 export async function updateUserOwnPassword(env: Env, userId: string, input: {

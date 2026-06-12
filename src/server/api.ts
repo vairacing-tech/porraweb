@@ -10,12 +10,15 @@ import {
   getMatches,
   getSquadPlayers,
   getTeams,
+  getUserClosedSummary,
+  getWorldStandings,
   resetUserPassword,
   savePrediction,
   setDoublePoints,
   setMatchResult,
   setUserBonusAsAdmin,
   setUserPredictionAsAdmin,
+  updateUserAvatar,
   updateUserOwnPassword,
   updateUserProfile
 } from "./db";
@@ -89,6 +92,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       const leaderboard = await getLeaderboard(env);
       const teams = await getTeams(env);
       const squadPlayers = await getSquadPlayers(env);
+      const worldStandings = await getWorldStandings(env);
       const bonus = user ? await getBonus(env, user.id) : null;
       const adminUsers = user?.isAdmin ? await getLeagueUsers(env) : undefined;
       const adminPredictions = user?.isAdmin ? await getLeaguePredictions(env) : undefined;
@@ -110,6 +114,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         user,
         teams,
         squadPlayers,
+        worldStandings,
         matches,
         nextMatch,
         leaderboard,
@@ -118,6 +123,11 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         adminPredictions,
         now
       });
+    }
+
+    if (segments[0] === "users" && segments[2] === "summary" && method === "GET") {
+      requireUser(user);
+      return json(await getUserClosedSummary(env, segments[1]));
     }
 
     if (segments[0] === "matches" && method === "GET" && segments.length === 1) {
@@ -169,6 +179,13 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
       requireUser(user);
       const body = await readJson<{ displayName?: string }>(request);
       await updateUserProfile(env, user!.id, { displayName: requireString(body.displayName, "displayName") });
+      return json({ ok: true });
+    }
+
+    if (segments[0] === "profile" && segments[1] === "avatar" && method === "PUT") {
+      requireUser(user);
+      const body = await readJson<{ avatarUrl?: string | null }>(request);
+      await updateUserAvatar(env, user!.id, typeof body.avatarUrl === "string" ? body.avatarUrl : null);
       return json({ ok: true });
     }
 

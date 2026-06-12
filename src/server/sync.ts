@@ -2,9 +2,12 @@ import { createId } from "./crypto";
 import { ensureSeeded, recalculateMatch } from "./db";
 import {
   fetchOpenLigaDbMatches,
+  fetchOpenLigaDbStandings,
   fetchOpenLigaDbTeams,
   normalizeLogoUrl,
   parseOpenLigaDbMatch,
+  parseOpenLigaDbStanding,
+  type ParsedOpenLigaDbStanding,
   type ParsedOpenLigaDbMatch
 } from "./providers/openligadb";
 import type { MatchGoal } from "../shared/types";
@@ -30,6 +33,8 @@ const providerNameToTeamId: Record<string, string> = {
   "australia": "australia",
   "australien": "australia",
   "austria": "austria",
+  "osterreich": "austria",
+  "oesterreich": "austria",
   "belgium": "belgica",
   "belgien": "belgica",
   "bosnia and herzegovina": "bosnia-y-herzegovina",
@@ -71,6 +76,7 @@ const providerNameToTeamId: Record<string, string> = {
   "elfenbeinkuste": "costa-de-marfil",
   "japan": "japon",
   "jordan": "jordania",
+  "jordanien": "jordania",
   "korea republic": "corea-del-sur",
   "south korea": "corea-del-sur",
   "sudkorea": "corea-del-sur",
@@ -146,9 +152,10 @@ async function runOpenLigaDbResultSync(env: Env): Promise<{ ok: boolean; request
   await ensureSeeded(env);
 
   try {
+    const standingsUpdated = await syncOpenLigaDbStandings(env);
     const targets = await getSyncMatchTargets(env);
     if (targets.length === 0) {
-      const message = "No hay partidos no finalizados en la ventana de sincronización.";
+      const message = `Clasificación mundial actualizada: ${standingsUpdated} equipos. No hay partidos no finalizados en la ventana de sincronización.`;
       await logSync(env, "skipped", 0, message, "openligadb");
       return { ok: true, requestsUsed: 0, message };
     }
@@ -166,7 +173,7 @@ async function runOpenLigaDbResultSync(env: Env): Promise<{ ok: boolean; request
 
     const parsedMatches = matches.map(parseOpenLigaDbMatch);
     const { linked, updated } = await applyOpenLigaDbMatches(env, parsedMatches, targets);
-    const message = `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leidos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado.`;
+    const message = `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado, clasificación mundial ${standingsUpdated} equipos.`;
     await logSync(env, "ok", 0, message, "openligadb");
     return { ok: true, requestsUsed: 0, message };
   } catch (error) {
@@ -182,6 +189,116 @@ async function getLocalSquadSummary(env: Env): Promise<{ players: number; teams:
     "SELECT COUNT(*) AS players, COUNT(DISTINCT team_id) AS teams FROM squad_players"
   ).first<{ players: number; teams: number }>();
   return { players: row?.players ?? 0, teams: row?.teams ?? 0 };
+}
+
+async function syncOpenLigaDbStandings(env: Env): Promise<number> {
+  const standings = await fetchOpenLigaDbStandings(env);
+  if (standings.length === 0) return 0;
+
+  return applyOpenLigaDbStandings(env, standings.map(parseOpenLigaDbStanding));
+}
+
+async function applyOpenLigaDbStandings(env: Env, rows: ParsedOpenLigaDbStanding[]): Promise<number> {
+  const [teams, groupMap] = await Promise.all([getLocalTeams(env), getLocalTeamGroups(env)]);
+  const now = new Date().toISOString();
+  const grouped = new Map<string, Array<{
+    teamId: string;
+    providerTeamId: number;
+    teamName: string;
+    shortCode: string | null;
+    logoUrl: string | null;
+    played: number;
+    won: number;
+    drawn: number;
+    lost: number;
+    goalsFor: number;
+    goalsAgainst: number;
+    goalDiff: number;
+    points: number;
+  }>>();
+
+  for (const row of rows) {
+    const resolvedTeamId = resolveProviderTeamId(row.providerTeamName);
+    const localTeam = teams.get(resolvedTeamId);
+    const teamId = localTeam?.id ?? resolvedTeamId;
+    const groupName = formatGroupName(groupMap.get(teamId) ?? "Sin grupo");
+    const groupRows = grouped.get(groupName) ?? [];
+    groupRows.push({
+      teamId,
+      providerTeamId: row.providerTeamId,
+      teamName: localTeam?.name ?? row.providerTeamName,
+      shortCode: localTeam?.short_code ?? row.shortCode,
+      logoUrl: row.logoUrl ?? localTeam?.logo_url ?? null,
+      played: row.played,
+      won: row.won,
+      drawn: row.drawn,
+      lost: row.lost,
+      goalsFor: row.goalsFor,
+      goalsAgainst: row.goalsAgainst,
+      goalDiff: row.goalDiff,
+      points: row.points
+    });
+    grouped.set(groupName, groupRows);
+  }
+
+  const statements: D1PreparedStatement[] = [env.DB.prepare("DELETE FROM world_standings")];
+  let count = 0;
+  for (const [groupName, groupRows] of grouped) {
+    const sortedRows = [...groupRows].sort(
+      (left, right) =>
+        right.points - left.points ||
+        right.goalDiff - left.goalDiff ||
+        right.goalsFor - left.goalsFor ||
+        left.teamName.localeCompare(right.teamName, "es")
+    );
+
+    for (const [index, row] of sortedRows.entries()) {
+      count += 1;
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO world_standings
+           (team_id, provider_team_id, group_name, rank, team_name, short_code, logo_url,
+            played, won, drawn, lost, goals_for, goals_against, goal_diff, points, updated_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)`
+        ).bind(
+          row.teamId,
+          row.providerTeamId,
+          groupName,
+          index + 1,
+          row.teamName,
+          row.shortCode,
+          row.logoUrl,
+          row.played,
+          row.won,
+          row.drawn,
+          row.lost,
+          row.goalsFor,
+          row.goalsAgainst,
+          row.goalDiff,
+          row.points,
+          now
+        )
+      );
+    }
+  }
+
+  await env.DB.batch(statements);
+  return count;
+}
+
+async function getLocalTeams(env: Env): Promise<Map<string, { id: string; name: string; short_code: string; logo_url: string | null }>> {
+  const { results } = await env.DB.prepare("SELECT id, name, short_code, logo_url FROM teams")
+    .all<{ id: string; name: string; short_code: string; logo_url: string | null }>();
+  return new Map(results.map((team) => [team.id, team]));
+}
+
+async function getLocalTeamGroups(env: Env): Promise<Map<string, string>> {
+  const { results } = await env.DB.prepare(
+    `SELECT group_name, home_team_id AS team_id FROM matches WHERE stage = 'GROUP' AND group_name IS NOT NULL
+     UNION
+     SELECT group_name, away_team_id AS team_id FROM matches WHERE stage = 'GROUP' AND group_name IS NOT NULL`
+  ).all<{ group_name: string; team_id: string }>();
+  return new Map(results.map((row) => [row.team_id, row.group_name]));
 }
 
 async function applyOpenLigaDbTeams(env: Env, teams: Array<{ teamName: string; teamIconUrl?: string | null }>): Promise<number> {
@@ -318,6 +435,11 @@ function findMatchingOpenLigaDbTarget(targets: MatchSyncRow[], parsed: ParsedOpe
 function resolveProviderTeamId(name: string): string {
   const normalized = normalizeProviderName(name);
   return normalizedProviderNameToTeamId[normalized] || normalized.replace(/\s+/g, "-");
+}
+
+function formatGroupName(value: string): string {
+  if (/^grupo\s+/i.test(value) || value === "Sin grupo") return value;
+  return `Grupo ${value}`;
 }
 
 function normalizeProviderName(name: string): string {

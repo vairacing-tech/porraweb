@@ -1,11 +1,12 @@
-import type { BonusPrediction, LeaderboardRow, Match, Prediction, SquadPlayer, Team } from "../shared/types";
+import type { BonusPrediction, LeaderboardRow, Match, Prediction, SquadPlayer, Team, WorldStanding } from "../shared/types";
 
 export interface BootstrapData {
   appName: string;
   league: { id: string; name: string };
-  user: { id: string; username: string; displayName: string; isAdmin: boolean; leagueId: string } | null;
+  user: { id: string; username: string; displayName: string; avatarUrl: string | null; isAdmin: boolean; leagueId: string } | null;
   teams: Team[];
   squadPlayers: SquadPlayer[];
+  worldStandings: WorldStanding[];
   matches: Array<Match & { myPrediction?: { id: string; homeScore: number; awayScore: number; points: number; outcome: string } | null }>;
   nextMatch: (Match & { myPrediction?: { id: string; homeScore: number; awayScore: number; points: number; outcome: string } | null }) | null;
   leaderboard: LeaderboardRow[];
@@ -30,6 +31,12 @@ export interface VisiblePrediction {
   awayScore: number;
   points: number;
   outcome: string;
+}
+
+export interface UserClosedSummary {
+  user: { id: string; username: string; displayName: string };
+  bonus: BonusPrediction | null;
+  predictions: Array<Prediction & { kickoffAt: string }>;
 }
 
 export interface RegisterInput {
@@ -73,6 +80,13 @@ export async function updateProfile(displayName: string): Promise<void> {
   });
 }
 
+export async function updateAvatar(avatarUrl: string | null): Promise<void> {
+  await request("/api/profile/avatar", {
+    method: "PUT",
+    body: JSON.stringify({ avatarUrl })
+  });
+}
+
 export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
   await request("/api/profile/password", {
     method: "PUT",
@@ -90,6 +104,10 @@ export async function savePrediction(matchId: string, homeScore: number, awaySco
 export async function fetchMatchPredictions(matchId: string): Promise<VisiblePrediction[]> {
   const data = await request<{ predictions: VisiblePrediction[] }>(`/api/matches/${matchId}/predictions`);
   return data.predictions;
+}
+
+export async function fetchUserSummary(userId: string): Promise<UserClosedSummary> {
+  return await request<UserClosedSummary>(`/api/users/${userId}/summary`);
 }
 
 export async function resetUserPassword(userId: string, newPassword: string): Promise<void> {

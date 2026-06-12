@@ -65,6 +65,7 @@ export interface Prediction {
 export interface LeaderboardRow {
   userId: string;
   displayName: string;
+  avatarUrl: string | null;
   points: number;
   exacts: number;
   championHit: boolean;
@@ -79,4 +80,22 @@ export interface BonusPrediction {
   topScorer: string | null;
   points: number;
   lockedAt: string;
+}
+
+export interface WorldStanding {
+  groupName: string;
+  rank: number;
+  teamId: string | null;
+  teamName: string;
+  shortCode: string | null;
+  logoUrl: string | null;
+  played: number;
+  won: number;
+  drawn: number;
+  lost: number;
+  goalsFor: number;
+  goalsAgainst: number;
+  goalDiff: number;
+  points: number;
+  updatedAt: string;
 }

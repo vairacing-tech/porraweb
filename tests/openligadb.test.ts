@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchOpenLigaDbMatches, parseOpenLigaDbMatch, selectFinalResult } from "../src/server/providers/openligadb";
+import { fetchOpenLigaDbMatches, parseOpenLigaDbMatch, parseOpenLigaDbStanding, selectFinalResult } from "../src/server/providers/openligadb";
 import type { Env } from "../src/server/types";
 
 describe("OpenLigaDB provider", () => {
@@ -49,6 +49,38 @@ describe("OpenLigaDB provider", () => {
         { resultTypeID: 2, pointsTeam1: 3, pointsTeam2: 2 }
       ])
     ).toMatchObject({ pointsTeam1: 3, pointsTeam2: 2 });
+  });
+
+  it("parses standings data into the internal shape", () => {
+    expect(
+      parseOpenLigaDbStanding({
+        teamInfoId: 761,
+        teamName: "Mexiko",
+        shortName: "MEX",
+        teamIconUrl: "http://example.com/mex.png",
+        points: 3,
+        opponentGoals: 0,
+        goals: 2,
+        matches: 1,
+        won: 1,
+        lost: 0,
+        draw: 0,
+        goalDiff: 2
+      })
+    ).toEqual({
+      providerTeamId: 761,
+      providerTeamName: "Mexiko",
+      shortCode: "MEX",
+      logoUrl: "https://example.com/mex.png",
+      points: 3,
+      goalsAgainst: 0,
+      goalsFor: 2,
+      played: 1,
+      won: 1,
+      lost: 0,
+      drawn: 0,
+      goalDiff: 2
+    });
   });
 
   it("keeps the published score for unfinished matches", () => {
