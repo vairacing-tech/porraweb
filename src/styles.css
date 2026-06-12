@@ -73,7 +73,7 @@ button {
   position: relative;
   z-index: 1;
   min-height: 100vh;
-  padding: max(20px, env(safe-area-inset-top)) 16px calc(150px + env(safe-area-inset-bottom));
+  padding: max(16px, env(safe-area-inset-top)) 12px calc(150px + env(safe-area-inset-bottom));
 }
 
 .topbar {
@@ -81,7 +81,7 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .brand {
@@ -145,8 +145,8 @@ button {
 }
 
 .next-hero {
-  margin-bottom: 14px;
-  padding: 20px 16px 18px;
+  margin-bottom: 10px;
+  padding: 14px 12px;
   border: 1px solid rgba(116, 223, 88, 0.8);
   border-radius: 8px;
   background: linear-gradient(145deg, rgba(10, 64, 35, 0.9), rgba(2, 23, 13, 0.86));
@@ -156,8 +156,8 @@ button {
 
 .hero-pill {
   width: fit-content;
-  margin: 0 auto 16px;
-  padding: 7px 18px;
+  margin: 0 auto 10px;
+  padding: 6px 16px;
   border-radius: 999px;
   background: linear-gradient(180deg, #28c45b, #0b8e3b);
   font-size: 14px;
@@ -170,11 +170,16 @@ button {
   color: #241700;
 }
 
+.hero-double {
+  width: fit-content;
+  margin: -2px auto 10px;
+}
+
 .hero-teams {
   display: grid;
   grid-template-columns: 58px 1fr 58px;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .hero-names {
@@ -203,7 +208,7 @@ button {
 }
 
 .hero-score {
-  margin-top: 10px;
+  margin-top: 8px;
   color: white;
   font-size: 34px;
   font-weight: 950;
@@ -217,7 +222,7 @@ button {
   flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
-  margin: 16px 0;
+  margin: 10px 0;
   color: rgba(255, 255, 255, 0.9);
   font-size: 13px;
   font-weight: 700;
@@ -266,18 +271,18 @@ button {
 }
 
 .prediction-card {
-  padding: 14px;
-  margin-bottom: 12px;
+  padding: 12px;
+  margin-bottom: 10px;
 }
 
 .prediction-card.featured {
-  padding: 16px;
+  padding: 12px;
 }
 
 .section-title {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   color: var(--green-700);
   font-size: 14px;
   font-weight: 950;
@@ -312,7 +317,7 @@ button {
 }
 
 .compact {
-  margin: 8px 0 10px;
+  margin: 6px 0 8px;
   font-size: 12px;
   font-weight: 700;
 }
@@ -471,18 +476,18 @@ button {
 .two-column {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 12px;
-  margin-bottom: 14px;
+  gap: 10px;
+  margin-bottom: 0;
 }
 
 .mini-card {
   min-width: 0;
   overflow: hidden;
-  padding: 12px;
+  padding: 10px;
 }
 
 .leaderboard {
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
 .board-head,
@@ -501,7 +506,7 @@ button {
 }
 
 .board-row {
-  min-height: 40px;
+  min-height: 34px;
   border-top: 1px solid var(--border);
   font-size: 13px;
 }
@@ -547,7 +552,7 @@ button {
 .today-list {
   display: grid;
   gap: 8px;
-  margin: 12px 0;
+  margin: 10px 0;
 }
 
 .today-row {
@@ -555,8 +560,8 @@ button {
   grid-template-columns: 30px minmax(0, 1fr) auto minmax(0, 1fr) 30px;
   align-items: center;
   gap: 5px;
-  min-height: 45px;
-  padding: 7px;
+  min-height: 42px;
+  padding: 6px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: white;
@@ -589,6 +594,19 @@ button {
   font-style: normal;
 }
 
+.x2-mini {
+  grid-column: 1 / -1;
+  width: fit-content;
+  margin: -2px auto 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fff1bf;
+  color: #875c00;
+  font-size: 10px;
+  line-height: 1.3;
+  text-transform: uppercase;
+}
+
 .link-button,
 .ghost-button {
   display: inline-flex;
@@ -608,51 +626,7 @@ button {
 .link-button {
   width: 100%;
   border: 0;
-}
-
-.bonus-banner {
-  display: grid;
-  grid-template-columns: 70px 1fr 56px;
-  align-items: center;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid rgba(116, 223, 88, 0.7);
-  border-radius: 8px;
-  background: linear-gradient(135deg, rgba(16, 31, 28, 0.94), rgba(2, 13, 9, 0.96));
-  color: white;
-  box-shadow: var(--shadow);
-}
-
-.bonus-icon {
-  display: grid;
-  place-items: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  background: linear-gradient(145deg, #77e95a, #139943);
-}
-
-.bonus-banner h2 {
-  margin: 0;
-  color: var(--green-300);
-  font-size: 24px;
-  text-transform: uppercase;
-}
-
-.bonus-banner p {
-  margin: 4px 0 9px;
-  color: rgba(255, 255, 255, 0.82);
-  font-size: 13px;
-}
-
-.bonus-banner > strong {
-  display: grid;
-  place-items: center;
-  min-height: 54px;
-  border: 1px solid rgba(116, 223, 88, 0.5);
-  border-radius: 8px;
-  color: white;
-  font-size: 22px;
+  min-height: 32px;
 }
 
 .progress {
@@ -671,7 +645,7 @@ button {
 
 .view-stack {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .view-header {
@@ -680,7 +654,7 @@ button {
 
 .view-header h2 {
   margin: 0 0 4px;
-  font-size: 30px;
+  font-size: 26px;
   font-weight: 950;
 }
 
@@ -844,8 +818,8 @@ button {
 
 .admin-card {
   display: grid;
-  gap: 10px;
-  padding: 14px;
+  gap: 12px;
+  padding: 12px;
 }
 
 .admin-card hr {
@@ -856,12 +830,32 @@ button {
 
 .admin-note {
   margin: 0;
-  padding: 10px;
+  padding: 9px;
   border-radius: 8px;
   background: #eef9f1;
   color: #125b2a;
   font-size: 12px;
   font-weight: 800;
+}
+
+.admin-section {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.admin-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--green-700);
+  font-size: 13px;
+  font-weight: 950;
+  text-transform: uppercase;
 }
 
 .admin-subtitle {
@@ -911,7 +905,7 @@ button {
 .profile-form {
   display: grid;
   gap: 10px;
-  padding: 14px;
+  padding: 12px;
 }
 
 .bottom-nav {

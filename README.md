@@ -34,10 +34,10 @@ Desde `Perfil -> Admin`, el admin puede:
 El proveedor principal de calendario/resultados es OpenLigaDB:
 
 - `OPENLIGADB_BASE_URL=https://api.openligadb.de`
-- `OPENLIGADB_LEAGUE_SHORTCUT=wm2026`
+- `OPENLIGADB_LEAGUE_SHORTCUT=wm26`
 - `OPENLIGADB_SEASON=2026`
 
-El shortcut `wm2026` esta en configuracion, no en codigo. Si OpenLigaDB publica el Mundial con otro shortcut, cambia `OPENLIGADB_LEAGUE_SHORTCUT` en `wrangler.toml`, `wrangler.sync.toml` y en los vars/secrets del entorno si aplica.
+El shortcut `wm26` esta en configuracion, no en codigo. Si OpenLigaDB publica el Mundial con otro shortcut, cambia `OPENLIGADB_LEAGUE_SHORTCUT` en `wrangler.toml`, `wrangler.sync.toml` y en los vars/secrets del entorno si aplica.
 
 API-Football queda solo como fallback opcional si existe `API_FOOTBALL_KEY`. La clave se configura como secreto y no se guarda en el repo.
 

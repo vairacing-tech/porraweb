@@ -34,6 +34,7 @@ export type OpenLigaDbMatch = {
     scoreTeam1: number;
     scoreTeam2: number;
     matchMinute?: number | null;
+    goalGetterID?: number | null;
     goalGetterName?: string | null;
     isPenalty?: boolean;
     isOwnGoal?: boolean;
@@ -43,6 +44,12 @@ export type OpenLigaDbMatch = {
     groupName?: string;
     groupOrderID?: number;
   };
+};
+
+export type OpenLigaDbGoalGetter = {
+  goalGetterId: number;
+  goalGetterName: string;
+  goalCount: number;
 };
 
 export type ParsedOpenLigaDbMatch = {
@@ -88,7 +95,9 @@ export async function fetchOpenLigaDbMatches(env: Env): Promise<OpenLigaDbMatch[
     return [];
   }
 
-  return fetchJson<OpenLigaDbMatch[]>(`${config.baseUrl}/getmatchdata/${config.leagueShortcut}/${config.season}`);
+  const matches = await fetchJson<OpenLigaDbMatch[]>(`${config.baseUrl}/getmatchdata/${config.leagueShortcut}/${config.season}`);
+  const goalGetters = await fetchJson<OpenLigaDbGoalGetter[]>(`${config.baseUrl}/getgoalgetters/${config.leagueShortcut}/${config.season}`);
+  return enrichGoalGetterNames(matches, goalGetters);
 }
 
 export async function fetchOpenLigaDbTeams(env: Env): Promise<OpenLigaDbTeam[]> {
@@ -133,6 +142,19 @@ function parseGoals(goals: NonNullable<OpenLigaDbMatch["goals"]>): MatchGoal[] {
     }));
 }
 
+function enrichGoalGetterNames(matches: OpenLigaDbMatch[], goalGetters: OpenLigaDbGoalGetter[]): OpenLigaDbMatch[] {
+  if (goalGetters.length === 0) return matches;
+
+  const byId = new Map(goalGetters.map((goalGetter) => [goalGetter.goalGetterId, goalGetter.goalGetterName]));
+  return matches.map((match) => ({
+    ...match,
+    goals: match.goals?.map((goal) => ({
+      ...goal,
+      goalGetterName: goal.goalGetterName?.trim() || (goal.goalGetterID ? byId.get(goal.goalGetterID) ?? "" : "")
+    }))
+  }));
+}
+
 export function selectFinalResult(results: OpenLigaDbResult[]): OpenLigaDbResult | null {
   if (results.length === 0) return null;
 
@@ -173,9 +195,17 @@ function getStatus(match: OpenLigaDbMatch, kickoffAt: string, finalResult: OpenL
   const kickoffTime = new Date(kickoffAt).getTime();
   const now = Date.now();
   const elapsed = now - kickoffTime;
-  if (finalResult && elapsed >= 180 * 60 * 1000) return "finished";
-  if (kickoffTime <= now && elapsed <= 180 * 60 * 1000) return "live";
+  const liveWindow = getLiveWindowMs(match);
+  if (finalResult && elapsed >= liveWindow) return "finished";
+  if (kickoffTime <= now && elapsed <= liveWindow) return "live";
   return "scheduled";
+}
+
+function getLiveWindowMs(match: OpenLigaDbMatch): number {
+  const groupOrder = match.group?.groupOrderID ?? 0;
+  const groupStageWindow = 150 * 60 * 1000;
+  const knockoutWindow = 210 * 60 * 1000;
+  return groupOrder > 0 && groupOrder <= 3 ? groupStageWindow : knockoutWindow;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {

@@ -222,7 +222,6 @@ function HomeView({
         <LeaderboardCard rows={data.leaderboard.slice(0, 5)} onOpen={onOpenLeaderboard} />
         <TodayCard matches={todayMatches} onOpen={onOpenMatches} />
       </section>
-      <BonusBanner data={data} />
     </>
   );
 }
@@ -231,6 +230,7 @@ function NextMatchHero({ match }: { match: Match }) {
   return (
     <section className="next-hero">
       <div className={`hero-pill ${match.status === "live" ? "live" : ""}`}>{matchStatusLabel(match)}</div>
+      {match.isDoublePoints ? <span className="double-chip hero-double">Puntos x2</span> : null}
       <div className="hero-teams">
         <TeamBadge team={match.homeTeam} large />
         <div className="hero-names">
@@ -701,82 +701,93 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
         <button type="button" className="ghost-button" onClick={handleSquadSync}>Cargar convocatorias</button>
         <button type="button" className="ghost-button" onClick={handleResultSync}>Sincronizar resultados</button>
       </div>
-      <label className="select-label">
-        <span>Participante</span>
-        <select value={targetUserId} onChange={(event) => setTargetUserId(event.target.value)}>
-          {users.length === 0 ? <option value="">Sin participantes</option> : null}
-          {users.map((item) => (
+      <section className="admin-section">
+        <div className="admin-section-head">
+          <strong>Editar partidos</strong>
+          {match?.isDoublePoints ? <span className="double-chip">x2 activo</span> : null}
+        </div>
+        <select value={matchId} onChange={(event) => setMatchId(event.target.value)}>
+          {data.matches.map((item) => (
             <option key={item.id} value={item.id}>
-              {item.displayName} ({item.username})
+              {formatDate(item.kickoffAt)} {formatTime(item.kickoffAt)} · {item.homeTeam.name} vs {item.awayTeam.name}
             </option>
           ))}
         </select>
-      </label>
-      <div className="admin-row">
-        <input
-          placeholder="Nueva contraseña"
-          type="text"
-          value={newPassword}
-          onChange={(event) => setNewPassword(event.target.value)}
+        <small className="admin-subtitle">Resultado real del partido</small>
+        <div className="admin-score">
+          <input type="number" min={0} value={home} onChange={(event) => setHome(Number(event.target.value))} />
+          <span>-</span>
+          <input type="number" min={0} value={away} onChange={(event) => setAway(Number(event.target.value))} />
+        </div>
+        <div className="card-actions">
+          <button type="button" className="ghost-button" onClick={toggleDouble}>
+            {match?.isDoublePoints ? "Quitar x2" : "Marcar x2"}
+          </button>
+          <button type="button" className="save-button" onClick={saveResult}>Finalizar</button>
+        </div>
+      </section>
+
+      <section className="admin-section">
+        <div className="admin-section-head">
+          <strong>Editar participante</strong>
+        </div>
+        <label className="select-label">
+          <span>Participante</span>
+          <select value={targetUserId} onChange={(event) => setTargetUserId(event.target.value)}>
+            {users.length === 0 ? <option value="">Sin participantes</option> : null}
+            {users.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.displayName} ({item.username})
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="admin-row">
+          <input
+            placeholder="Nueva contraseña"
+            type="text"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+          />
+          <button type="button" className="ghost-button" onClick={handlePasswordReset}>Resetear</button>
+        </div>
+        <small className="admin-subtitle">Pronóstico del participante</small>
+        <div className="admin-score">
+          <input type="number" min={0} value={userHome} onChange={(event) => setUserHome(Number(event.target.value))} />
+          <span>-</span>
+          <input type="number" min={0} value={userAway} onChange={(event) => setUserAway(Number(event.target.value))} />
+        </div>
+        <button type="button" className="save-button wide" onClick={handleUserPrediction}>Guardar pronóstico</button>
+        <hr />
+        <small className="admin-subtitle">Bonus del participante</small>
+        <SelectTeam
+          label="Campeón"
+          teams={data.teams}
+          value={bonusChampionId}
+          onChange={(value) => {
+            setBonusChampionId(value);
+            setBonusRunnerUpId((current) => (current === value ? firstDifferentTeam(data.teams, value)?.id ?? null : current));
+          }}
         />
-        <button type="button" className="ghost-button" onClick={handlePasswordReset}>Resetear</button>
-      </div>
-      <hr />
-      <select value={matchId} onChange={(event) => setMatchId(event.target.value)}>
-        {data.matches.map((item) => (
-          <option key={item.id} value={item.id}>
-            {formatDate(item.kickoffAt)} {formatTime(item.kickoffAt)} · {item.homeTeam.name} vs {item.awayTeam.name}
-          </option>
-        ))}
-      </select>
-      <small className="admin-subtitle">Resultado real del partido</small>
-      <div className="admin-score">
-        <input type="number" min={0} value={home} onChange={(event) => setHome(Number(event.target.value))} />
-        <span>-</span>
-        <input type="number" min={0} value={away} onChange={(event) => setAway(Number(event.target.value))} />
-      </div>
-      <div className="card-actions">
-        <button type="button" className="ghost-button" onClick={toggleDouble}>
-          {match?.isDoublePoints ? "Quitar x2" : "Marcar x2"}
-        </button>
-        <button type="button" className="save-button" onClick={saveResult}>Finalizar</button>
-      </div>
-      <small className="admin-subtitle">Pronóstico del participante seleccionado</small>
-      <div className="admin-score">
-        <input type="number" min={0} value={userHome} onChange={(event) => setUserHome(Number(event.target.value))} />
-        <span>-</span>
-        <input type="number" min={0} value={userAway} onChange={(event) => setUserAway(Number(event.target.value))} />
-      </div>
-      <button type="button" className="save-button wide" onClick={handleUserPrediction}>Guardar pronóstico de usuario</button>
-      <hr />
-      <small className="admin-subtitle">Bonus del participante seleccionado</small>
-      <SelectTeam
-        label="Campeón"
-        teams={data.teams}
-        value={bonusChampionId}
-        onChange={(value) => {
-          setBonusChampionId(value);
-          setBonusRunnerUpId((current) => (current === value ? firstDifferentTeam(data.teams, value)?.id ?? null : current));
-        }}
-      />
-      <SelectTeam label="Subcampeón" teams={bonusRunnerUpTeams} value={bonusRunnerUpId} onChange={setBonusRunnerUpId} />
-      <SelectTeam
-        label="Selección del máximo goleador"
-        teams={data.teams}
-        value={bonusScorerTeamId}
-        onChange={(value) => {
-          const player = firstPlayerForTeam(data.squadPlayers, value);
-          setBonusScorerTeamId(value);
-          setBonusScorerPlayerId(player?.apiPlayerId ?? null);
-        }}
-      />
-      <SelectPlayer
-        label="Máximo goleador"
-        players={bonusScorerPlayers}
-        value={bonusScorerPlayerId}
-        onChange={setBonusScorerPlayerId}
-      />
-      <button type="button" className="save-button wide" onClick={handleUserBonus}>Guardar bonus de usuario</button>
+        <SelectTeam label="Subcampeón" teams={bonusRunnerUpTeams} value={bonusRunnerUpId} onChange={setBonusRunnerUpId} />
+        <SelectTeam
+          label="Selección del máximo goleador"
+          teams={data.teams}
+          value={bonusScorerTeamId}
+          onChange={(value) => {
+            const player = firstPlayerForTeam(data.squadPlayers, value);
+            setBonusScorerTeamId(value);
+            setBonusScorerPlayerId(player?.apiPlayerId ?? null);
+          }}
+        />
+        <SelectPlayer
+          label="Máximo goleador"
+          players={bonusScorerPlayers}
+          value={bonusScorerPlayerId}
+          onChange={setBonusScorerPlayerId}
+        />
+        <button type="button" className="save-button wide" onClick={handleUserBonus}>Guardar bonus</button>
+      </section>
     </div>
   );
 }
@@ -996,24 +1007,11 @@ function TodayCard({ matches, onOpen }: { matches: Match[]; onOpen: () => void }
             <span>{shortTeam(match.awayTeam.name)}</span>
             <TeamBadge team={match.awayTeam} />
             <em>{matchSummary(match)} · {formatDate(match.kickoffAt)} · {formatTime(match.kickoffAt)}</em>
+            {match.isDoublePoints ? <b className="x2-mini">x2</b> : null}
           </div>
         ))}
       </div>
       <button className="link-button" type="button" onClick={onOpen}>Ver todos los partidos</button>
-    </section>
-  );
-}
-
-function BonusBanner({ data }: { data: BootstrapData }) {
-  return (
-    <section className="bonus-banner">
-      <div className="bonus-icon"><Gift size={34} /></div>
-      <div>
-        <h2>Bonus+</h2>
-        <p>{data.bonus ? "Tus bonus estan bloqueados" : "Completa tus bonus iniciales"}</p>
-        <div className="progress"><span style={{ width: data.bonus ? "100%" : "35%" }} /></div>
-      </div>
-      <strong>+20</strong>
     </section>
   );
 }
@@ -1112,7 +1110,8 @@ function matchStatusLabel(match: Match): string {
 function matchSummary(match: Match): string {
   const score = hasScore(match) ? `${match.homeScore}-${match.awayScore}` : null;
   const status = match.status === "live" || match.status === "finished" ? matchStatusLabel(match) : null;
-  return [status, score].filter(Boolean).join(" · ") || "Programado";
+  const double = match.isDoublePoints ? "x2" : null;
+  return [status, score, double].filter(Boolean).join(" · ") || "Programado";
 }
 
 function formatGoal(goal: Match["goals"][number]): string {
