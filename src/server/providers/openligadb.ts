@@ -169,7 +169,8 @@ export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMa
   const penaltyResult = selectPenaltyShootoutResult(results);
   const finalResult = penaltyResult ?? extraTimeResult ?? regularTimeResult;
   const fallbackScore = getLatestGoalScore(goals);
-  const visibleScore = selectVisibleScore(match, extraTimeResult ?? regularTimeResult, fallbackScore);
+  const scoreResult = regularTimeResult ?? extraTimeResult ?? penaltyResult;
+  const visibleScore = selectVisibleScore(match, scoreResult, fallbackScore);
   const status = getStatus(match, kickoffAt, finalResult);
 
   return {

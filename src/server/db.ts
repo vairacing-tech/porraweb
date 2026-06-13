@@ -729,11 +729,7 @@ export async function setUserPredictionAsAdmin(env: Env, actorUserId: string, in
             stage: match.stage,
             homeScore: match.homeScore,
             awayScore: match.awayScore,
-            isDoublePoints: match.isDoublePoints,
-            extraHomeScore: match.extraHomeScore,
-            extraAwayScore: match.extraAwayScore,
-            penaltyHomeScore: match.penaltyHomeScore,
-            penaltyAwayScore: match.penaltyAwayScore
+            isDoublePoints: match.isDoublePoints
           }
         )
       : { points: 0, outcome: "pending" as const };
@@ -781,11 +777,7 @@ export async function recalculateMatch(env: Env, matchId: string): Promise<void>
         stage: match.stage,
         homeScore: match.homeScore ?? 0,
         awayScore: match.awayScore ?? 0,
-        isDoublePoints: match.isDoublePoints,
-        extraHomeScore: match.extraHomeScore,
-        extraAwayScore: match.extraAwayScore,
-        penaltyHomeScore: match.penaltyHomeScore,
-        penaltyAwayScore: match.penaltyAwayScore
+        isDoublePoints: match.isDoublePoints
       }
     );
     return env.DB.prepare("UPDATE predictions SET points = ?1, outcome = ?2, updated_at = ?3 WHERE id = ?4").bind(

@@ -29,25 +29,32 @@ describe("scoring", () => {
     ).toEqual({ points: 2, outcome: "trend" });
   });
 
-  it("rejects draw predictions in knockouts", () => {
-    expect(validatePrediction("ROUND_OF_16", { homeScore: 1, awayScore: 1 })).toContain("eliminatorias");
+  it("allows draw predictions in knockouts because predictions are for 90 minutes", () => {
+    expect(validatePrediction("ROUND_OF_16", { homeScore: 1, awayScore: 1 })).toBeNull();
   });
 
-  it("uses penalty shootout winner for knockout trend when the match score is tied", () => {
+  it("scores knockout predictions against the 90-minute result only", () => {
     expect(
       scorePrediction(
         { homeScore: 2, awayScore: 1 },
         {
           stage: "ROUND_OF_16",
           homeScore: 1,
-          awayScore: 1,
-          extraHomeScore: 1,
-          extraAwayScore: 1,
-          penaltyHomeScore: 5,
-          penaltyAwayScore: 4
+          awayScore: 1
         }
       )
-    ).toEqual({ points: 1, outcome: "trend" });
+    ).toEqual({ points: 0, outcome: "miss" });
+
+    expect(
+      scorePrediction(
+        { homeScore: 1, awayScore: 1 },
+        {
+          stage: "ROUND_OF_16",
+          homeScore: 1,
+          awayScore: 1
+        }
+      )
+    ).toEqual({ points: 3, outcome: "exact" });
   });
 
   it("locks two hours before kickoff", () => {

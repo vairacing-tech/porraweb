@@ -518,10 +518,10 @@ function KnockoutResultDetails({ match, compact = false }: { match: Match; compa
   const hasExtraTime = hasScore(match.extraHomeScore, match.extraAwayScore);
   const hasPenalties = hasScore(match.penaltyHomeScore, match.penaltyAwayScore);
   const winner = getWinnerTeam(match);
-  if (!hasExtraTime && !hasPenalties && !winner) return null;
 
   return (
     <div className={`knockout-result ${compact ? "compact" : ""}`}>
+      <small>Pronóstico y puntos: marcador al final de los 90 minutos.</small>
       {winner ? <strong>Ganador: {winner.name}</strong> : null}
       {hasExtraTime ? (
         <span>Prórroga: {match.extraHomeScore} - {match.extraAwayScore}</span>
@@ -752,7 +752,7 @@ function WorldStandingsView({ data }: { data: BootstrapData }) {
           <li>La clasificación y los resultados se actualizan desde OpenLigaDB con el worker.</li>
           <li>Se clasifican los dos primeros de cada grupo y los ocho mejores terceros.</li>
           <li>Al cerrarse los grupos, la app resuelve los dieciseisavos con la tabla oficial de terceros y carga los cruces ya sembrados.</li>
-          <li>En eliminatorias se guardan 90 minutos, prórroga y penaltis cuando OpenLigaDB los publique.</li>
+          <li>En eliminatorias la porra puntúa el marcador a 90 minutos; prórroga y penaltis solo aclaran el ganador real del cruce.</li>
           <li>Los pronósticos ya guardados y la clasificación de la porra no se recalculan salvo que cambie el resultado real del partido.</li>
         </ul>
       </div>
