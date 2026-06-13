@@ -639,10 +639,12 @@ function MatchesView({
     if (scrollRequest.id === 0 || handledScrollRequestRef.current === scrollRequest.id) return;
     const target = (scrollRequest.matchId ? matches.find((match) => match.id === scrollRequest.matchId) : null) ?? getLastFinishedMatch(matches) ?? matches[0] ?? null;
     if (!target) return;
-    handledScrollRequestRef.current = scrollRequest.id;
 
     const timeoutId = window.setTimeout(() => {
-      document.getElementById(matchCardDomId(target.id))?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const targetElement = document.getElementById(matchCardDomId(target.id));
+      if (!targetElement) return;
+      handledScrollRequestRef.current = scrollRequest.id;
+      scrollElementIntoAppView(targetElement);
     }, 80);
 
     return () => window.clearTimeout(timeoutId);
@@ -1701,6 +1703,19 @@ function getLastFinishedMatch<T extends Match>(matches: T[]): T | null {
 
 function matchCardDomId(matchId: string): string {
   return `match-card-${matchId}`;
+}
+
+function scrollElementIntoAppView(element: HTMLElement): void {
+  const scrollContainer = element.closest(".app-shell") as HTMLElement | null;
+  if (!scrollContainer) {
+    element.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  const containerTop = scrollContainer.getBoundingClientRect().top;
+  const elementTop = element.getBoundingClientRect().top;
+  const scrollTop = scrollContainer.scrollTop + elementTop - containerTop - 8;
+  scrollContainer.scrollTo({ top: Math.max(0, scrollTop), behavior: "smooth" });
 }
 
 function matchCardSubtitle(match: Match): string {
