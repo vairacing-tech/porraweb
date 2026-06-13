@@ -18,8 +18,10 @@ import type { Env } from "./types";
 type MatchSyncRow = {
   id: string;
   api_fixture_id: number | null;
+  stage: string;
   kickoff_at: string;
   matchday: number | null;
+  group_name: string | null;
   status: string;
   home_score: number | null;
   away_score: number | null;
@@ -35,6 +37,7 @@ type MatchApplyResult = {
   linked: number;
   updated: number;
   finishedFromLive: number;
+  liveStandingGroups: Set<string>;
 };
 
 type ResultSyncMode = "force" | "adaptive";
@@ -221,19 +224,25 @@ async function runOpenLigaDbResultSync(env: Env, decision: ResultSyncDecision): 
     }
 
     const parsedMatches = matches.map(parseOpenLigaDbMatch);
-    const { linked, updated, finishedFromLive } = await applyOpenLigaDbMatches(env, parsedMatches, targets);
+    const { linked, updated, finishedFromLive, liveStandingGroups } = await applyOpenLigaDbMatches(env, parsedMatches, targets);
     const runCompletionFullSync = !decision.includeAuxiliaryData && finishedFromLive > 0;
     if (runCompletionFullSync) {
       standingsUpdated = await syncOpenLigaDbStandings(env);
       resolvedBefore = await resolveKnockoutMatches(env);
       teamsUpdated = await applyOpenLigaDbTeams(env, await fetchOpenLigaDbTeams(env));
     }
+    const runLiveStandingsSync = !decision.includeAuxiliaryData && !runCompletionFullSync && liveStandingGroups.size > 0;
+    if (runLiveStandingsSync) {
+      standingsUpdated = await syncOpenLigaDbStandings(env, liveStandingGroups);
+    }
     const resolvedAfter = decision.includeAuxiliaryData || runCompletionFullSync ? await resolveKnockoutMatches(env) : 0;
     if (updated > 0) await safeEvaluateAchievements(env);
     const ranAuxiliaryData = decision.includeAuxiliaryData || runCompletionFullSync;
     const message = ranAuxiliaryData
       ? `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado, clasificación mundial ${standingsUpdated} equipos, cruces resueltos ${resolvedBefore + resolvedAfter}.`
-      : `OpenLigaDB live: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados.`;
+      : runLiveStandingsSync
+        ? `OpenLigaDB live: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, clasificación de grupos ${[...liveStandingGroups].join(", ")} actualizada (${standingsUpdated} equipos).`
+        : `OpenLigaDB live: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados.`;
     await logSync(env, "ok", 0, message, ranAuxiliaryData ? "openligadb" : decision.provider);
     return { ok: true, requestsUsed: 0, message };
   } catch (error) {
@@ -286,14 +295,14 @@ async function getLocalSquadSummary(env: Env): Promise<{ players: number; teams:
   return { players: row?.players ?? 0, teams: row?.teams ?? 0 };
 }
 
-async function syncOpenLigaDbStandings(env: Env): Promise<number> {
+async function syncOpenLigaDbStandings(env: Env, onlyGroupNames?: Set<string>): Promise<number> {
   const standings = await fetchOpenLigaDbStandings(env);
   if (standings.length === 0) return 0;
 
-  return applyOpenLigaDbStandings(env, standings.map(parseOpenLigaDbStanding));
+  return applyOpenLigaDbStandings(env, standings.map(parseOpenLigaDbStanding), onlyGroupNames);
 }
 
-async function applyOpenLigaDbStandings(env: Env, rows: ParsedOpenLigaDbStanding[]): Promise<number> {
+async function applyOpenLigaDbStandings(env: Env, rows: ParsedOpenLigaDbStanding[], onlyGroupNames?: Set<string>): Promise<number> {
   const [teams, groupMap] = await Promise.all([getLocalTeams(env), getLocalTeamGroups(env)]);
   const now = new Date().toISOString();
   const grouped = new Map<string, Array<{
@@ -317,6 +326,7 @@ async function applyOpenLigaDbStandings(env: Env, rows: ParsedOpenLigaDbStanding
     const localTeam = teams.get(resolvedTeamId);
     const teamId = localTeam?.id ?? resolvedTeamId;
     const groupName = formatGroupName(groupMap.get(teamId) ?? "Sin grupo");
+    if (onlyGroupNames && !onlyGroupNames.has(groupName)) continue;
     const groupRows = grouped.get(groupName) ?? [];
     groupRows.push({
       teamId,
@@ -336,7 +346,11 @@ async function applyOpenLigaDbStandings(env: Env, rows: ParsedOpenLigaDbStanding
     grouped.set(groupName, groupRows);
   }
 
-  const statements: D1PreparedStatement[] = [env.DB.prepare("DELETE FROM world_standings")];
+  if (onlyGroupNames && grouped.size === 0) return 0;
+
+  const statements: D1PreparedStatement[] = onlyGroupNames
+    ? [...onlyGroupNames].map((groupName) => env.DB.prepare("DELETE FROM world_standings WHERE group_name = ?1").bind(groupName))
+    : [env.DB.prepare("DELETE FROM world_standings")];
   let count = 0;
   for (const [groupName, groupRows] of grouped) {
     const sortedRows = [...groupRows].sort(
@@ -418,6 +432,7 @@ async function applyOpenLigaDbMatches(
   let linked = 0;
   let updated = 0;
   let finishedFromLive = 0;
+  const liveStandingGroups = new Set<string>();
 
   for (const parsed of parsedMatches) {
     const match = findMatchingOpenLigaDbTarget(targets, parsed);
@@ -463,17 +478,44 @@ async function applyOpenLigaDbMatches(
     if (isLiveToFinishedTransition(match.status, parsed.status)) {
       finishedFromLive += 1;
     }
+    if (
+      shouldRefreshGroupStandingsForMatch({
+        stage: match.stage,
+        matchday: match.matchday,
+        groupName: match.group_name,
+        previousStatus: match.status,
+        nextStatus: parsed.status,
+        scoreChanged
+      })
+    ) {
+      liveStandingGroups.add(formatGroupName(match.group_name!));
+    }
     if (parsed.status === "finished" && parsed.homeScore !== null && parsed.awayScore !== null && (scoreChanged || finishedChanged)) {
       await recalculateMatch(env, match.id);
       updated += 1;
     }
   }
 
-  return { linked, updated, finishedFromLive };
+  return { linked, updated, finishedFromLive, liveStandingGroups };
 }
 
 export function isLiveToFinishedTransition(previousStatus: string, nextStatus: string): boolean {
   return previousStatus === "live" && nextStatus === "finished";
+}
+
+export function shouldRefreshGroupStandingsForMatch(input: {
+  stage: string;
+  matchday: number | null;
+  groupName: string | null;
+  previousStatus: string;
+  nextStatus: string;
+  scoreChanged: boolean;
+}): boolean {
+  if (input.stage !== "GROUP" || !input.groupName) return false;
+  if (typeof input.matchday !== "number" || input.matchday < 1 || input.matchday > 3) return false;
+  const started = input.previousStatus !== "live" && input.nextStatus === "live";
+  const liveScoreChanged = input.nextStatus === "live" && input.scoreChanged;
+  return started || liveScoreChanged;
 }
 
 async function canonicalizeMatchGoals(
@@ -549,7 +591,7 @@ async function getSyncMatchTargets(env: Env): Promise<MatchSyncRow[]> {
   const from = new Date(now - syncTargetLookbehindMs).toISOString();
   const to = new Date(now + syncTargetLookaheadMs).toISOString();
   const { results } = await env.DB.prepare(
-    `SELECT id, api_fixture_id, kickoff_at, matchday, status,
+    `SELECT id, api_fixture_id, stage, kickoff_at, matchday, group_name, status,
             home_score, away_score, extra_home_score, extra_away_score,
             penalty_home_score, penalty_away_score, home_team_id, away_team_id
      FROM matches

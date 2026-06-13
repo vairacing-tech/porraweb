@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getResultSyncDecision, isLiveToFinishedTransition } from "../src/server/sync";
+import { getResultSyncDecision, isLiveToFinishedTransition, shouldRefreshGroupStandingsForMatch } from "../src/server/sync";
 import type { Env } from "../src/server/types";
 
 function envForDecision(input: { activeMatchId?: string | null; lastFullSyncAt?: string | null }): Env {
@@ -89,5 +89,49 @@ describe("result sync cadence decision", () => {
     expect(isLiveToFinishedTransition("scheduled", "finished")).toBe(false);
     expect(isLiveToFinishedTransition("finished", "finished")).toBe(false);
     expect(isLiveToFinishedTransition("live", "live")).toBe(false);
+  });
+
+  it("refreshes group standings when a group match starts or changes score", () => {
+    const base = {
+      stage: "GROUP",
+      matchday: 2,
+      groupName: "Grupo B"
+    };
+
+    expect(shouldRefreshGroupStandingsForMatch({ ...base, previousStatus: "scheduled", nextStatus: "live", scoreChanged: false })).toBe(true);
+    expect(shouldRefreshGroupStandingsForMatch({ ...base, previousStatus: "live", nextStatus: "live", scoreChanged: true })).toBe(true);
+  });
+
+  it("does not refresh group standings for knockouts, later matchdays, or finished transitions", () => {
+    expect(
+      shouldRefreshGroupStandingsForMatch({
+        stage: "ROUND_OF_32",
+        matchday: 4,
+        groupName: null,
+        previousStatus: "scheduled",
+        nextStatus: "live",
+        scoreChanged: false
+      })
+    ).toBe(false);
+    expect(
+      shouldRefreshGroupStandingsForMatch({
+        stage: "GROUP",
+        matchday: 4,
+        groupName: "Grupo A",
+        previousStatus: "scheduled",
+        nextStatus: "live",
+        scoreChanged: false
+      })
+    ).toBe(false);
+    expect(
+      shouldRefreshGroupStandingsForMatch({
+        stage: "GROUP",
+        matchday: 3,
+        groupName: "Grupo A",
+        previousStatus: "live",
+        nextStatus: "finished",
+        scoreChanged: true
+      })
+    ).toBe(false);
   });
 });
