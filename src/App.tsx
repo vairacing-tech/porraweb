@@ -17,7 +17,7 @@ import {
   User,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   changePassword,
   deleteUser,
@@ -164,7 +164,7 @@ export function App() {
     const draft = scores[match.id] ?? { home: 0, away: 0 };
     try {
       await savePrediction(match.id, draft.home, draft.away);
-      await refresh();
+      await refresh({ silent: true, preserveDataOnError: true });
       setNotice("Pronóstico guardado.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "No se pudo guardar.");
@@ -617,13 +617,15 @@ function MatchesView({
   scrollRequest: number;
 }) {
   const [filter, setFilter] = useState<MatchFilter>("all");
+  const handledScrollRequestRef = useRef(0);
   const filters = useMemo(() => buildMatchFilters(data.matches), [data.matches]);
   const matches = useMemo(() => filterMatches(data.matches, filter), [data.matches, filter]);
 
   useEffect(() => {
-    if (scrollRequest === 0) return;
+    if (scrollRequest === 0 || handledScrollRequestRef.current === scrollRequest) return;
     const target = getLastFinishedMatch(matches) ?? matches[0] ?? null;
     if (!target) return;
+    handledScrollRequestRef.current = scrollRequest;
 
     const timeoutId = window.setTimeout(() => {
       document.getElementById(matchCardDomId(target.id))?.scrollIntoView({ behavior: "smooth", block: "start" });
