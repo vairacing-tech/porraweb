@@ -512,7 +512,7 @@ function PostMatchPhrase({ outcome, phrase }: { outcome: string; phrase: string 
   );
 }
 
-function KnockoutResultDetails({ match, compact = false }: { match: Match; compact?: boolean }) {
+function KnockoutResultDetails({ match, compact = false, showScoringNote = true }: { match: Match; compact?: boolean; showScoringNote?: boolean }) {
   if (match.stage === "GROUP") return null;
 
   const hasExtraTime = hasScore(match.extraHomeScore, match.extraAwayScore);
@@ -521,7 +521,7 @@ function KnockoutResultDetails({ match, compact = false }: { match: Match; compa
 
   return (
     <div className={`knockout-result ${compact ? "compact" : ""}`}>
-      <small>Pronóstico y puntos: marcador al final de los 90 minutos.</small>
+      {showScoringNote ? <small>Pronóstico y puntos: marcador al final de los 90 minutos.</small> : null}
       {winner ? <strong>Ganador: {winner.name}</strong> : null}
       {hasExtraTime ? (
         <span>Prórroga: {match.extraHomeScore} - {match.extraAwayScore}</span>
@@ -797,7 +797,7 @@ function WorldKnockoutView({ matches, groupStageComplete }: { matches: Match[]; 
                     <span className="bracket-score">{score ? `${score.home} - ${score.away}` : "vs"}</span>
                     <BracketTeam team={match.awayTeam} winner={winnerId === match.awayTeam.id} align="right" />
                   </div>
-                  <KnockoutResultDetails match={match} compact />
+                  <KnockoutResultDetails match={match} compact showScoringNote={false} />
                 </div>
               );
             })}
