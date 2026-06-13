@@ -8,6 +8,8 @@ export interface ScoreInput {
 export interface MatchResult extends ScoreInput {
   stage: MatchStage;
   isDoublePoints?: boolean;
+  extraHomeScore?: number | null;
+  extraAwayScore?: number | null;
   penaltyHomeScore?: number | null;
   penaltyAwayScore?: number | null;
 }
@@ -61,7 +63,7 @@ export function scorePrediction(prediction: ScoreInput, result: MatchResult): Sc
     return { points: 3 * multiplier, outcome: "exact" };
   }
 
-  if (getTrend(prediction) === getTrend(result)) {
+  if (getTrend(prediction) === getResultTrend(result)) {
     return { points: 1 * multiplier, outcome: "trend" };
   }
 
@@ -72,4 +74,20 @@ export function getTrend(score: ScoreInput): "home" | "away" | "draw" {
   if (score.homeScore > score.awayScore) return "home";
   if (score.homeScore < score.awayScore) return "away";
   return "draw";
+}
+
+function getResultTrend(result: MatchResult): "home" | "away" | "draw" {
+  const regularTrend = getTrend(result);
+  if (!isKnockoutStage(result.stage) || regularTrend !== "draw") return regularTrend;
+
+  if (result.extraHomeScore !== null && result.extraHomeScore !== undefined && result.extraAwayScore !== null && result.extraAwayScore !== undefined) {
+    const extraTrend = getTrend({ homeScore: result.extraHomeScore, awayScore: result.extraAwayScore });
+    if (extraTrend !== "draw") return extraTrend;
+  }
+
+  if (result.penaltyHomeScore !== null && result.penaltyHomeScore !== undefined && result.penaltyAwayScore !== null && result.penaltyAwayScore !== undefined) {
+    return getTrend({ homeScore: result.penaltyHomeScore, awayScore: result.penaltyAwayScore });
+  }
+
+  return regularTrend;
 }

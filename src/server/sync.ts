@@ -1,6 +1,7 @@
 import { createId } from "./crypto";
 import { ensureSeeded, recalculateMatch } from "./db";
 import { safeEvaluateAchievements } from "./achievements";
+import { resolveKnockoutMatches } from "./knockout";
 import {
   fetchOpenLigaDbMatches,
   fetchOpenLigaDbStandings,
@@ -22,6 +23,10 @@ type MatchSyncRow = {
   status: string;
   home_score: number | null;
   away_score: number | null;
+  extra_home_score: number | null;
+  extra_away_score: number | null;
+  penalty_home_score: number | null;
+  penalty_away_score: number | null;
   home_team_id: string;
   away_team_id: string;
 };
@@ -154,9 +159,10 @@ async function runOpenLigaDbResultSync(env: Env): Promise<{ ok: boolean; request
 
   try {
     const standingsUpdated = await syncOpenLigaDbStandings(env);
+    const resolvedBefore = await resolveKnockoutMatches(env);
     const targets = await getSyncMatchTargets(env);
     if (targets.length === 0) {
-      const message = `Clasificación mundial actualizada: ${standingsUpdated} equipos. No hay partidos no finalizados en la ventana de sincronización.`;
+      const message = `Clasificación mundial actualizada: ${standingsUpdated} equipos, cruces resueltos: ${resolvedBefore}. No hay partidos no finalizados en la ventana de sincronización.`;
       await logSync(env, "skipped", 0, message, "openligadb");
       return { ok: true, requestsUsed: 0, message };
     }
@@ -174,8 +180,9 @@ async function runOpenLigaDbResultSync(env: Env): Promise<{ ok: boolean; request
 
     const parsedMatches = matches.map(parseOpenLigaDbMatch);
     const { linked, updated } = await applyOpenLigaDbMatches(env, parsedMatches, targets);
+    const resolvedAfter = await resolveKnockoutMatches(env);
     if (updated > 0) await safeEvaluateAchievements(env);
-    const message = `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado, clasificación mundial ${standingsUpdated} equipos.`;
+    const message = `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado, clasificación mundial ${standingsUpdated} equipos, cruces resueltos ${resolvedBefore + resolvedAfter}.`;
     await logSync(env, "ok", 0, message, "openligadb");
     return { ok: true, requestsUsed: 0, message };
   } catch (error) {
@@ -334,8 +341,11 @@ async function applyOpenLigaDbMatches(
     await env.DB.prepare(
       `UPDATE matches
        SET api_fixture_id = ?1, kickoff_at = ?2, lock_at = ?3, status = ?4,
-           home_score = ?5, away_score = ?6, goals_json = ?7, updated_at = ?8
-       WHERE id = ?9`
+           home_score = ?5, away_score = ?6,
+           extra_home_score = ?7, extra_away_score = ?8,
+           penalty_home_score = ?9, penalty_away_score = ?10,
+           goals_json = ?11, updated_at = ?12
+       WHERE id = ?13`
     )
       .bind(
         parsed.providerMatchId,
@@ -344,6 +354,10 @@ async function applyOpenLigaDbMatches(
         parsed.status,
         parsed.homeScore,
         parsed.awayScore,
+        parsed.extraHomeScore,
+        parsed.extraAwayScore,
+        parsed.penaltyHomeScore,
+        parsed.penaltyAwayScore,
         JSON.stringify(goals),
         now,
         match.id
@@ -351,7 +365,13 @@ async function applyOpenLigaDbMatches(
       .run();
 
     linked += 1;
-    const scoreChanged = match.home_score !== parsed.homeScore || match.away_score !== parsed.awayScore;
+    const scoreChanged =
+      match.home_score !== parsed.homeScore ||
+      match.away_score !== parsed.awayScore ||
+      match.extra_home_score !== parsed.extraHomeScore ||
+      match.extra_away_score !== parsed.extraAwayScore ||
+      match.penalty_home_score !== parsed.penaltyHomeScore ||
+      match.penalty_away_score !== parsed.penaltyAwayScore;
     const finishedChanged = match.status !== "finished" && parsed.status === "finished";
     if (parsed.status === "finished" && parsed.homeScore !== null && parsed.awayScore !== null && (scoreChanged || finishedChanged)) {
       await recalculateMatch(env, match.id);
@@ -405,7 +425,9 @@ async function getSyncMatchTargets(env: Env): Promise<MatchSyncRow[]> {
   const from = new Date(now - 7 * 60 * 60 * 1000).toISOString();
   const to = new Date(now + 3 * 60 * 60 * 1000).toISOString();
   const { results } = await env.DB.prepare(
-    `SELECT id, api_fixture_id, kickoff_at, matchday, status, home_score, away_score, home_team_id, away_team_id
+    `SELECT id, api_fixture_id, kickoff_at, matchday, status,
+            home_score, away_score, extra_home_score, extra_away_score,
+            penalty_home_score, penalty_away_score, home_team_id, away_team_id
      FROM matches
      WHERE status <> 'finished'
        AND kickoff_at BETWEEN ?1 AND ?2

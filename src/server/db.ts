@@ -730,6 +730,8 @@ export async function setUserPredictionAsAdmin(env: Env, actorUserId: string, in
             homeScore: match.homeScore,
             awayScore: match.awayScore,
             isDoublePoints: match.isDoublePoints,
+            extraHomeScore: match.extraHomeScore,
+            extraAwayScore: match.extraAwayScore,
             penaltyHomeScore: match.penaltyHomeScore,
             penaltyAwayScore: match.penaltyAwayScore
           }
@@ -780,6 +782,8 @@ export async function recalculateMatch(env: Env, matchId: string): Promise<void>
         homeScore: match.homeScore ?? 0,
         awayScore: match.awayScore ?? 0,
         isDoublePoints: match.isDoublePoints,
+        extraHomeScore: match.extraHomeScore,
+        extraAwayScore: match.extraAwayScore,
         penaltyHomeScore: match.penaltyHomeScore,
         penaltyAwayScore: match.penaltyAwayScore
       }

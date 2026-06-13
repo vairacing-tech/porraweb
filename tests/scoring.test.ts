@@ -33,6 +33,23 @@ describe("scoring", () => {
     expect(validatePrediction("ROUND_OF_16", { homeScore: 1, awayScore: 1 })).toContain("eliminatorias");
   });
 
+  it("uses penalty shootout winner for knockout trend when the match score is tied", () => {
+    expect(
+      scorePrediction(
+        { homeScore: 2, awayScore: 1 },
+        {
+          stage: "ROUND_OF_16",
+          homeScore: 1,
+          awayScore: 1,
+          extraHomeScore: 1,
+          extraAwayScore: 1,
+          penaltyHomeScore: 5,
+          penaltyAwayScore: 4
+        }
+      )
+    ).toEqual({ points: 1, outcome: "trend" });
+  });
+
   it("locks two hours before kickoff", () => {
     const kickoff = "2026-06-11T19:00:00.000Z";
     expect(getLockAt(kickoff)).toBe("2026-06-11T17:00:00.000Z");

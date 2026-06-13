@@ -43,7 +43,7 @@ import {
 import { getPostMatchPhrase, getPreviewPhrase } from "./domain/fortilinCopy";
 import { isPredictionLocked } from "./domain/scoring";
 import { achievementDefinitions } from "./shared/achievements";
-import type { Match, PredictionOutcome, SquadPlayer, Team, UserAchievement } from "./shared/types";
+import type { Match, MatchStage, PredictionOutcome, SquadPlayer, Team, UserAchievement } from "./shared/types";
 
 type Tab = "home" | "matches" | "leaderboard" | "world" | "bonus" | "profile";
 
@@ -53,10 +53,18 @@ type MyPrediction = { id: string; homeScore: number; awayScore: number; points: 
 
 type MatchFilter = "all" | "knockout" | `matchday-${number}`;
 
+type WorldMode = "knockout" | "groups";
+
 type ScorerRow = {
   player: string;
   teamName: string;
   goals: number;
+};
+
+type KnockoutRoundGroup = {
+  stage: MatchStage;
+  label: string;
+  matches: Match[];
 };
 
 export function App() {
@@ -71,6 +79,7 @@ export function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [phraseSessionSeed] = useState(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const [matchScrollRequest, setMatchScrollRequest] = useState(0);
 
   useEffect(() => {
     void refresh();
@@ -162,6 +171,13 @@ export function App() {
     }
   }
 
+  function handleTabChange(nextTab: Tab) {
+    if (nextTab === "matches") {
+      setMatchScrollRequest((current) => current + 1);
+    }
+    setTab(nextTab);
+  }
+
   if (loading || (!data && !loadError)) {
     return (
       <main className="app-shell loading-shell">
@@ -223,14 +239,14 @@ export function App() {
             setScores={setScores}
             onSave={handleSave}
             refreshKey={data.now}
-            onOpenMatches={() => setTab("matches")}
-            onOpenLeaderboard={() => setTab("leaderboard")}
+            onOpenMatches={() => handleTabChange("matches")}
+            onOpenLeaderboard={() => handleTabChange("leaderboard")}
             onSelectUser={setSelectedUserId}
             phraseSessionSeed={phraseSessionSeed}
           />
         ) : null}
         {tab === "matches" ? (
-          <MatchesView data={appData} scores={scores} setScores={setScores} onSave={handleSave} refreshKey={data.now} />
+          <MatchesView data={appData} scores={scores} setScores={setScores} onSave={handleSave} refreshKey={data.now} scrollRequest={matchScrollRequest} />
         ) : null}
         {tab === "leaderboard" ? <LeaderboardView data={appData} onSelectUser={setSelectedUserId} /> : null}
         {tab === "world" ? <WorldStandingsView data={appData} /> : null}
@@ -243,7 +259,7 @@ export function App() {
           />
         ) : null}
       </div>
-      <BottomNav active={tab} onChange={setTab} />
+      <BottomNav active={tab} onChange={handleTabChange} />
       {selectedUserId ? <UserSummaryModal userId={selectedUserId} data={appData} onClose={() => setSelectedUserId(null)} /> : null}
     </main>
   );
@@ -392,7 +408,8 @@ function PredictionCard({
   onSave,
   refreshKey,
   userId,
-  featured = false
+  featured = false,
+  domId
 }: {
   match: Match;
   scores: ScoreDraft;
@@ -401,6 +418,7 @@ function PredictionCard({
   refreshKey: string;
   userId: string;
   featured?: boolean;
+  domId?: string;
 }) {
   const locked = isPredictionLocked(match.kickoffAt) || match.status === "finished";
   const draft = scores[match.id] ?? { home: 0, away: 0 };
@@ -422,7 +440,7 @@ function PredictionCard({
   }
 
   return (
-    <section className={`card prediction-card ${featured ? "featured" : ""}`} id={featured ? "pronostico" : undefined}>
+    <section className={`card prediction-card ${featured ? "featured" : ""}`} id={domId ?? (featured ? "pronostico" : undefined)}>
       <div className="section-title">
         <ListChecks size={18} />
         <span>Haz tu pronóstico</span>
@@ -432,7 +450,11 @@ function PredictionCard({
         {locked ? <em><Lock size={13} /> Bloqueado</em> : <em>Bloqueo 2h antes</em>}
       </div>
       <p className="muted compact">
+        {match.stage !== "GROUP" ? matchCardSubtitle(match) : (
+          <>
         {match.round} · Grupo {match.groupName} · {formatDate(match.kickoffAt)} · {formatTime(match.kickoffAt)}
+          </>
+        )}
       </p>
       <div className="score-row">
         <TeamInline team={match.homeTeam} />
@@ -444,6 +466,7 @@ function PredictionCard({
       {score ? (
         <p className="live-score-line">{matchStatusLabel(match)} · Resultado actual: {score.home} - {score.away}</p>
       ) : null}
+      <KnockoutResultDetails match={match} />
       {postMatchPhrase ? <PostMatchPhrase outcome={savedPrediction?.outcome ?? "pending"} phrase={postMatchPhrase} /> : null}
       <MatchGoals match={match} />
       <VisiblePredictions match={match} refreshKey={refreshKey} />
@@ -485,6 +508,35 @@ function PostMatchPhrase({ outcome, phrase }: { outcome: string; phrase: string 
     <div className={`post-match-phrase ${outcome}`}>
       <NotebookPen size={16} />
       <span>{phrase}</span>
+    </div>
+  );
+}
+
+function KnockoutResultDetails({ match, compact = false }: { match: Match; compact?: boolean }) {
+  if (match.stage === "GROUP") return null;
+
+  const hasExtraTime = hasScore(match.extraHomeScore, match.extraAwayScore);
+  const hasPenalties = hasScore(match.penaltyHomeScore, match.penaltyAwayScore);
+  const winner = getWinnerTeam(match);
+  if (!hasExtraTime && !hasPenalties && !winner) return null;
+
+  return (
+    <div className={`knockout-result ${compact ? "compact" : ""}`}>
+      {winner ? <strong>Ganador: {winner.name}</strong> : null}
+      {hasExtraTime ? (
+        <span>Prórroga: {match.extraHomeScore} - {match.extraAwayScore}</span>
+      ) : null}
+      {hasPenalties ? <PenaltyShootoutLine match={match} /> : null}
+    </div>
+  );
+}
+
+function PenaltyShootoutLine({ match }: { match: Match }) {
+  if (!hasScore(match.penaltyHomeScore, match.penaltyAwayScore)) return null;
+
+  return (
+    <div className="penalty-line">
+      <b>Penaltis: {match.penaltyHomeScore} - {match.penaltyAwayScore}</b>
     </div>
   );
 }
@@ -554,17 +606,31 @@ function MatchesView({
   scores,
   setScores,
   onSave,
-  refreshKey
+  refreshKey,
+  scrollRequest
 }: {
   data: BootstrapData;
   scores: ScoreDraft;
   setScores: (setter: (current: ScoreDraft) => ScoreDraft) => void;
   onSave: (match: Match) => void;
   refreshKey: string;
+  scrollRequest: number;
 }) {
   const [filter, setFilter] = useState<MatchFilter>("all");
   const filters = useMemo(() => buildMatchFilters(data.matches), [data.matches]);
   const matches = useMemo(() => filterMatches(data.matches, filter), [data.matches, filter]);
+
+  useEffect(() => {
+    if (scrollRequest === 0) return;
+    const target = getLastFinishedMatch(matches) ?? matches[0] ?? null;
+    if (!target) return;
+
+    const timeoutId = window.setTimeout(() => {
+      document.getElementById(matchCardDomId(target.id))?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [matches, scrollRequest]);
 
   return (
     <section className="view-stack">
@@ -580,7 +646,16 @@ function MatchesView({
         ))}
       </div>
       {matches.map((match) => (
-        <PredictionCard key={match.id} match={match} scores={scores} setScores={setScores} onSave={onSave} refreshKey={refreshKey} userId={data.user?.id ?? ""} />
+        <PredictionCard
+          key={match.id}
+          domId={matchCardDomId(match.id)}
+          match={match}
+          scores={scores}
+          setScores={setScores}
+          onSave={onSave}
+          refreshKey={refreshKey}
+          userId={data.user?.id ?? ""}
+        />
       ))}
     </section>
   );
@@ -601,67 +676,146 @@ function LeaderboardView({ data, onSelectUser }: { data: BootstrapData; onSelect
 function WorldStandingsView({ data }: { data: BootstrapData }) {
   const groups = useMemo(() => groupWorldStandings(data.worldStandings), [data.worldStandings]);
   const bestThirdKeys = useMemo(() => getBestThirdPlaceKeys(data.worldStandings), [data.worldStandings]);
+  const hasKnockouts = useMemo(() => data.matches.some((match) => match.stage !== "GROUP"), [data.matches]);
+  const groupStageComplete = useMemo(() => isGroupStageComplete(data.matches), [data.matches]);
   const updatedAt = data.worldStandings[0]?.updatedAt ?? null;
+  const [mode, setMode] = useState<WorldMode>(() => (groupStageComplete && hasKnockouts ? "knockout" : "groups"));
+
+  useEffect(() => {
+    if (groupStageComplete && hasKnockouts) setMode("knockout");
+  }, [groupStageComplete, hasKnockouts]);
+
+  const showKnockouts = hasKnockouts && mode === "knockout";
 
   return (
     <section className="view-stack">
       <div className="view-header">
-        <h2>Clasificación Mundial</h2>
-        <p>Grupos oficiales cacheados desde OpenLigaDB.</p>
+        <h2>{showKnockouts ? "Cruces Mundial" : "Clasificación Mundial"}</h2>
+        <p>{showKnockouts ? "Eliminatorias preparadas con horarios oficiales y equipos resueltos al cerrar grupos." : "Grupos oficiales cacheados desde OpenLigaDB."}</p>
       </div>
       {updatedAt ? <p className="world-updated">Actualizado: {formatDate(updatedAt)} · {formatTime(updatedAt)} Madrid</p> : null}
-      {groups.length === 0 ? (
-        <div className="card full-card">
-          <p className="empty-state">La clasificación del Mundial se cargará en la próxima sincronización de OpenLigaDB.</p>
+      {hasKnockouts ? (
+        <div className="segmented world-mode">
+          <button type="button" className={mode === "knockout" ? "active" : ""} onClick={() => setMode("knockout")}>Cruces</button>
+          <button type="button" className={mode === "groups" ? "active" : ""} onClick={() => setMode("groups")}>Grupos</button>
         </div>
       ) : null}
-      {groups.map((group) => (
-        <section className="card world-group-card" key={group.name}>
-          <div className="section-title">
-            <Table2 size={18} />
-            <span>{group.name}</span>
-          </div>
-          <div className="world-table">
-            <div className="world-head">
-              <span>#</span>
-              <span>Selección</span>
-              <span>PJ</span>
-              <span>DG</span>
-              <span>Pts</span>
+      {showKnockouts ? <WorldKnockoutView matches={data.matches} groupStageComplete={groupStageComplete} /> : (
+        <>
+          {groups.length === 0 ? (
+            <div className="card full-card">
+              <p className="empty-state">La clasificación del Mundial se cargará en la próxima sincronización de OpenLigaDB.</p>
             </div>
-            {group.rows.map((row) => {
-              const qualification = worldQualificationStatus(row, bestThirdKeys);
+          ) : null}
+          {groups.map((group) => (
+            <section className="card world-group-card" key={group.name}>
+              <div className="section-title">
+                <Table2 size={18} />
+                <span>{group.name}</span>
+              </div>
+              <div className="world-table">
+                <div className="world-head">
+                  <span>#</span>
+                  <span>Selección</span>
+                  <span>PJ</span>
+                  <span>DG</span>
+                  <span>Pts</span>
+                </div>
+                {group.rows.map((row) => {
+                  const qualification = worldQualificationStatus(row, bestThirdKeys);
+                  return (
+                    <div className={`world-row ${qualification}`} key={`${group.name}-${row.teamId ?? row.teamName}`}>
+                      <span>{row.rank}</span>
+                      <TeamBadge team={{ id: row.teamId ?? row.teamName, name: row.teamName, shortCode: row.shortCode ?? row.teamName.slice(0, 3), logoUrl: row.logoUrl }} />
+                      <strong>{row.teamName}</strong>
+                      <em>{row.played}</em>
+                      <em>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</em>
+                      <b>{row.points}</b>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
+          {groups.length > 0 ? (
+            <div className="world-legend">
+              <span><i className="legend-direct" /> 1.º y 2.º: pasan directos</span>
+              <span><i className="legend-third" /> 8 mejores terceros</span>
+              <small>Provisional según puntos, diferencia de goles y goles a favor publicados por OpenLigaDB.</small>
+            </div>
+          ) : null}
+        </>
+      )}
+      <div className="rules-card">
+        <strong>Fase de grupos y eliminatorias</strong>
+        <ul>
+          <li>La clasificación y los resultados se actualizan desde OpenLigaDB con el worker.</li>
+          <li>Se clasifican los dos primeros de cada grupo y los ocho mejores terceros.</li>
+          <li>Al cerrarse los grupos, la app resuelve los dieciseisavos con la tabla oficial de terceros y carga los cruces ya sembrados.</li>
+          <li>En eliminatorias se guardan 90 minutos, prórroga y penaltis cuando OpenLigaDB los publique.</li>
+          <li>Los pronósticos ya guardados y la clasificación de la porra no se recalculan salvo que cambie el resultado real del partido.</li>
+        </ul>
+      </div>
+    </section>
+  );
+}
+
+function WorldKnockoutView({ matches, groupStageComplete }: { matches: Match[]; groupStageComplete: boolean }) {
+  const rounds = useMemo(() => getKnockoutRoundGroups(matches), [matches]);
+  if (rounds.length === 0) {
+    return (
+      <div className="card full-card">
+        <p className="empty-state">Los cruces aparecerán cuando se cargue el calendario de eliminatorias.</p>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="world-legend bracket-note">
+        <span><i className={groupStageComplete ? "legend-direct" : "legend-third"} /> {groupStageComplete ? "Cruces activos con equipos resueltos" : "Cruces preparados hasta que cierre la fase de grupos"}</span>
+        <small>Los placeholders como 1.º Grupo A o Ganador M73 se reemplazan automáticamente al sincronizar OpenLigaDB.</small>
+      </div>
+      {rounds.map((round) => (
+        <section className="card bracket-round-card" key={round.stage}>
+          <div className="section-title">
+            <Trophy size={18} />
+            <span>{round.label}</span>
+          </div>
+          <div className="bracket-list">
+            {round.matches.map((match) => {
+              const score = getVisibleMatchScore(match);
+              const winnerId = getWinnerTeamId(match);
               return (
-                <div className={`world-row ${qualification}`} key={`${group.name}-${row.teamId ?? row.teamName}`}>
-                  <span>{row.rank}</span>
-                  <TeamBadge team={{ id: row.teamId ?? row.teamName, name: row.teamName, shortCode: row.shortCode ?? row.teamName.slice(0, 3), logoUrl: row.logoUrl }} />
-                  <strong>{row.teamName}</strong>
-                  <em>{row.played}</em>
-                  <em>{row.goalDiff > 0 ? `+${row.goalDiff}` : row.goalDiff}</em>
-                  <b>{row.points}</b>
+                <div className="bracket-match" key={match.id}>
+                  <div className="bracket-meta">
+                    <span>{matchNumberLabel(match)}</span>
+                    <em>{formatDate(match.kickoffAt)} · {formatTime(match.kickoffAt)} Madrid</em>
+                  </div>
+                  <div className="bracket-teams">
+                    <BracketTeam team={match.homeTeam} winner={winnerId === match.homeTeam.id} />
+                    <span className="bracket-score">{score ? `${score.home} - ${score.away}` : "vs"}</span>
+                    <BracketTeam team={match.awayTeam} winner={winnerId === match.awayTeam.id} align="right" />
+                  </div>
+                  <KnockoutResultDetails match={match} compact />
                 </div>
               );
             })}
           </div>
         </section>
       ))}
-      {groups.length > 0 ? (
-        <div className="world-legend">
-          <span><i className="legend-direct" /> 1.º y 2.º: pasan directos</span>
-          <span><i className="legend-third" /> 8 mejores terceros</span>
-          <small>Provisional según puntos, diferencia de goles y goles a favor publicados por OpenLigaDB.</small>
-        </div>
-      ) : null}
-      <div className="rules-card">
-        <strong>Fase de grupos y eliminatorias</strong>
-        <ul>
-          <li>Esta pantalla muestra la fase de grupos desde OpenLigaDB y se actualiza con el worker.</li>
-          <li>Se clasifican los dos primeros de cada grupo y los ocho mejores terceros.</li>
-          <li>Cuando empiecen eliminatorias, los partidos seguirán apareciendo en Partidos bajo el filtro “Elim.”.</li>
-          <li>Los pronósticos ya guardados y la clasificación de la porra no se recalculan salvo que cambie el resultado real del partido.</li>
-        </ul>
-      </div>
-    </section>
+    </>
+  );
+}
+
+function BracketTeam({ team, align = "left", winner = false }: { team: Team; align?: "left" | "right"; winner?: boolean }) {
+  const placeholder = team.id.startsWith("slot-");
+  return (
+    <div className={`bracket-team ${align} ${winner ? "winner" : ""} ${placeholder ? "placeholder" : ""}`}>
+      {align === "left" ? <TeamBadge team={team} /> : null}
+      <strong>{team.name}</strong>
+      {align === "right" ? <TeamBadge team={team} /> : null}
+    </div>
   );
 }
 
@@ -1524,6 +1678,96 @@ function filterMatches<T extends Match>(matches: T[], filter: MatchFilter): T[] 
   const matchday = Number(filter.replace("matchday-", ""));
   return matches.filter((match) => match.stage === "GROUP" && match.matchday === matchday);
 }
+
+function getLastFinishedMatch<T extends Match>(matches: T[]): T | null {
+  return [...matches].reverse().find((match) => match.status === "finished") ?? null;
+}
+
+function matchCardDomId(matchId: string): string {
+  return `match-card-${matchId}`;
+}
+
+function matchCardSubtitle(match: Match): string {
+  const context = match.stage === "GROUP" ? `Grupo ${match.groupName}` : matchNumberLabel(match);
+  return [match.round, context, formatDate(match.kickoffAt), formatTime(match.kickoffAt)].filter(Boolean).join(" · ");
+}
+
+function matchNumberLabel(match: Match): string {
+  const number = match.id.match(/\d+$/)?.[0];
+  return number ? `M${Number(number)}` : match.round;
+}
+
+function isGroupStageComplete(matches: Match[]): boolean {
+  const groupMatches = matches.filter((match) => match.stage === "GROUP");
+  return groupMatches.length > 0 && groupMatches.every((match) => match.status === "finished");
+}
+
+function getKnockoutRoundGroups(matches: Match[]): KnockoutRoundGroup[] {
+  const byStage = new Map<MatchStage, Match[]>();
+  for (const match of matches.filter((item) => item.stage !== "GROUP")) {
+    const roundMatches = byStage.get(match.stage) ?? [];
+    roundMatches.push(match);
+    byStage.set(match.stage, roundMatches);
+  }
+
+  return knockoutStageOrder
+    .map((stage) => {
+      const roundMatches = byStage.get(stage) ?? [];
+      return {
+        stage,
+        label: knockoutStageLabels[stage],
+        matches: sortMatchesByKickoff(roundMatches)
+      };
+    })
+    .filter((round) => round.matches.length > 0);
+}
+
+function getWinnerTeam(match: Match): Team | null {
+  const winnerId = getWinnerTeamId(match);
+  if (!winnerId) return null;
+  if (winnerId === match.homeTeam.id) return match.homeTeam;
+  if (winnerId === match.awayTeam.id) return match.awayTeam;
+  return null;
+}
+
+function getWinnerTeamId(match: Match): string | null {
+  const winnerSide = getWinnerSide(match);
+  if (!winnerSide) return null;
+  return winnerSide === "home" ? match.homeTeam.id : match.awayTeam.id;
+}
+
+function getWinnerSide(match: Match): "home" | "away" | null {
+  const regularSide = scoreWinnerSide(match.homeScore, match.awayScore);
+  if (regularSide) return regularSide;
+
+  const extraSide = scoreWinnerSide(match.extraHomeScore, match.extraAwayScore);
+  if (extraSide) return extraSide;
+
+  return scoreWinnerSide(match.penaltyHomeScore, match.penaltyAwayScore);
+}
+
+function scoreWinnerSide(home: number | null | undefined, away: number | null | undefined): "home" | "away" | null {
+  if (home === null || home === undefined || away === null || away === undefined) return null;
+  if (home > away) return "home";
+  if (away > home) return "away";
+  return null;
+}
+
+function hasScore(home: number | null | undefined, away: number | null | undefined): boolean {
+  return home !== null && home !== undefined && away !== null && away !== undefined;
+}
+
+const knockoutStageOrder: MatchStage[] = ["ROUND_OF_32", "ROUND_OF_16", "QUARTER_FINAL", "SEMI_FINAL", "THIRD_PLACE", "FINAL"];
+
+const knockoutStageLabels: Record<MatchStage, string> = {
+  GROUP: "Grupos",
+  ROUND_OF_32: "Dieciseisavos",
+  ROUND_OF_16: "Octavos",
+  QUARTER_FINAL: "Cuartos",
+  SEMI_FINAL: "Semifinales",
+  THIRD_PLACE: "Tercer puesto",
+  FINAL: "Final"
+};
 
 function getMyPrediction(match: Match): MyPrediction | null {
   return (match as Match & { myPrediction?: MyPrediction | null }).myPrediction ?? null;

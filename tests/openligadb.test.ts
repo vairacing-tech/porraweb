@@ -1,5 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { fetchOpenLigaDbMatches, parseOpenLigaDbMatch, parseOpenLigaDbStanding, selectFinalResult } from "../src/server/providers/openligadb";
+import {
+  fetchOpenLigaDbMatches,
+  parseOpenLigaDbMatch,
+  parseOpenLigaDbStanding,
+  selectExtraTimeResult,
+  selectFinalResult,
+  selectPenaltyShootoutResult,
+  selectRegularTimeResult
+} from "../src/server/providers/openligadb";
 import type { Env } from "../src/server/types";
 
 describe("OpenLigaDB provider", () => {
@@ -43,13 +51,50 @@ describe("OpenLigaDB provider", () => {
     ]);
   });
 
-  it("prefers resultTypeID 2 as final result", () => {
+  it("selects regular-time result independently of MatchResults order", () => {
     expect(
-      selectFinalResult([
+      selectRegularTimeResult([
         { resultTypeID: 1, pointsTeam1: 0, pointsTeam2: 0 },
         { resultTypeID: 2, pointsTeam1: 3, pointsTeam2: 2 }
       ])
     ).toMatchObject({ pointsTeam1: 3, pointsTeam2: 2 });
+  });
+
+  it("prefers decisive knockout results over the 90-minute result", () => {
+    const results = [
+        { resultTypeID: 1, pointsTeam1: 0, pointsTeam2: 0 },
+        { resultTypeID: 2, pointsTeam1: 1, pointsTeam2: 1 },
+        { resultTypeID: 4, pointsTeam1: 2, pointsTeam2: 2 },
+        { resultTypeID: 5, pointsTeam1: 6, pointsTeam2: 5 }
+      ];
+
+    expect(selectExtraTimeResult(results)).toMatchObject({ pointsTeam1: 2, pointsTeam2: 2 });
+    expect(selectPenaltyShootoutResult(results)).toMatchObject({ pointsTeam1: 6, pointsTeam2: 5 });
+    expect(selectFinalResult(results)).toMatchObject({ pointsTeam1: 6, pointsTeam2: 5 });
+  });
+
+  it("parses extra-time and penalty results for knockout matches", () => {
+    const parsed = parseOpenLigaDbMatch({
+      matchID: 90002,
+      matchDateTime: "2026-07-04T21:00:00",
+      matchDateTimeUTC: "2026-07-04T19:00:00Z",
+      matchIsFinished: true,
+      team1: { teamName: "Mexiko", shortName: "MEX" },
+      team2: { teamName: "Sudafrica", shortName: "RSA" },
+      group: { groupName: "Dieciseisavos", groupOrderID: 4 },
+      matchResults: [
+        { resultTypeID: 2, resultName: "Endergebnis", pointsTeam1: 1, pointsTeam2: 1 },
+        { resultTypeID: 5, resultName: "nach Elfmeterschießen", pointsTeam1: 5, pointsTeam2: 4 },
+        { resultTypeID: 4, resultName: "nach Verlängerung", pointsTeam1: 1, pointsTeam2: 1 }
+      ]
+    });
+
+    expect(parsed.homeScore).toBe(1);
+    expect(parsed.awayScore).toBe(1);
+    expect(parsed.extraHomeScore).toBe(1);
+    expect(parsed.extraAwayScore).toBe(1);
+    expect(parsed.penaltyHomeScore).toBe(5);
+    expect(parsed.penaltyAwayScore).toBe(4);
   });
 
   it("parses standings data into the internal shape", () => {

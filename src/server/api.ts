@@ -24,6 +24,7 @@ import {
   updateUserProfile
 } from "./db";
 import { HttpError, json, readJson, requireInt, requireString, toErrorResponse } from "./http";
+import { resolveKnockoutMatches } from "./knockout";
 import { runResultSync, runSquadSync } from "./sync";
 import type { Env } from "./types";
 
@@ -241,6 +242,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
           awayScore: requireInt(body.awayScore, "awayScore"),
           status: body.status === "live" || body.status === "scheduled" ? body.status : "finished"
         });
+        await resolveKnockoutMatches(env);
         await safeEvaluateAchievements(env);
         return json({ ok: true });
       }

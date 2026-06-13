@@ -96,6 +96,10 @@ export type ParsedOpenLigaDbMatch = {
   status: MatchStatus;
   homeScore: number | null;
   awayScore: number | null;
+  extraHomeScore: number | null;
+  extraAwayScore: number | null;
+  penaltyHomeScore: number | null;
+  penaltyAwayScore: number | null;
   goals: MatchGoal[];
 };
 
@@ -159,9 +163,13 @@ export async function fetchOpenLigaDbStandings(env: Env): Promise<OpenLigaDbStan
 export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMatch {
   const kickoffAt = normalizeKickoff(match.matchDateTimeUTC || match.matchDateTime);
   const goals = parseGoals(match.goals || []);
-  const finalResult = selectFinalResult(match.matchResults || []);
+  const results = match.matchResults || [];
+  const regularTimeResult = selectRegularTimeResult(results);
+  const extraTimeResult = selectExtraTimeResult(results);
+  const penaltyResult = selectPenaltyShootoutResult(results);
+  const finalResult = penaltyResult ?? extraTimeResult ?? regularTimeResult;
   const fallbackScore = getLatestGoalScore(goals);
-  const visibleScore = selectVisibleScore(match, finalResult, fallbackScore);
+  const visibleScore = selectVisibleScore(match, extraTimeResult ?? regularTimeResult, fallbackScore);
   const status = getStatus(match, kickoffAt, finalResult);
 
   return {
@@ -176,6 +184,10 @@ export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMa
     status,
     homeScore: visibleScore?.homeScore ?? null,
     awayScore: visibleScore?.awayScore ?? null,
+    extraHomeScore: extraTimeResult?.pointsTeam1 ?? null,
+    extraAwayScore: extraTimeResult?.pointsTeam2 ?? null,
+    penaltyHomeScore: penaltyResult?.pointsTeam1 ?? null,
+    penaltyAwayScore: penaltyResult?.pointsTeam2 ?? null,
     goals
   };
 }
@@ -256,15 +268,43 @@ function getGoalGetterId(value: { goalGetterID?: number | null; goalGetterId?: n
 export function selectFinalResult(results: OpenLigaDbResult[]): OpenLigaDbResult | null {
   if (results.length === 0) return null;
 
+  return selectPenaltyShootoutResult(results) ?? selectExtraTimeResult(results) ?? selectRegularTimeResult(results) ?? selectHighestOrderResult(results);
+}
+
+export function selectRegularTimeResult(results: OpenLigaDbResult[]): OpenLigaDbResult | null {
   const byType = results.find((result) => result.resultTypeID === 2);
   if (byType) return byType;
 
   const byName = results.find((result) => {
     const text = `${result.resultName || ""} ${result.resultDescription || ""}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-    return text.includes("endergebnis") || text.includes("final") || text.includes("endstand");
+    return text.includes("endergebnis") || text.includes("nach 90") || text.includes("offiziellen spielzeit");
   });
-  if (byName) return byName;
+  return byName ?? null;
+}
 
+export function selectExtraTimeResult(results: OpenLigaDbResult[]): OpenLigaDbResult | null {
+  const byType = results.find((result) => result.resultTypeID === 4);
+  if (byType) return byType;
+
+  const byName = results.find((result) => {
+    const text = `${result.resultName || ""} ${result.resultDescription || ""}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    return text.includes("verlangerung") || text.includes("extra time");
+  });
+  return byName ?? null;
+}
+
+export function selectPenaltyShootoutResult(results: OpenLigaDbResult[]): OpenLigaDbResult | null {
+  const byType = results.find((result) => result.resultTypeID === 5);
+  if (byType) return byType;
+
+  const byName = results.find((result) => {
+    const text = `${result.resultName || ""} ${result.resultDescription || ""}`.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    return text.includes("elfmeterschiessen") || text.includes("penalt");
+  });
+  return byName ?? null;
+}
+
+function selectHighestOrderResult(results: OpenLigaDbResult[]): OpenLigaDbResult | null {
   return [...results].sort((left, right) => {
     const leftOrder = left.resultOrderID ?? left.resultID ?? 0;
     const rightOrder = right.resultOrderID ?? right.resultID ?? 0;
