@@ -5,13 +5,12 @@ Web movil para la liga fija `Fortilin`.
 ## Acceso
 
 - Participantes: crean usuario desde la pantalla inicial. No hay codigo de liga ni codigo de admin.
-- Admin: usuario `admin`, contrasena `Porra.44`.
 - El admin se crea automaticamente al inicializar D1. No participa en la liga, no aparece en la clasificacion y no suma puntos.
 
 ## Flujo recomendado antes de invitar usuarios
 
 1. Desplegar la app y aplicar la migracion D1.
-2. Entrar con `admin` / `Porra.44`.
+2. Entrar con admin.
 3. Ir a `Perfil -> Admin`.
 4. Pulsar `Cargar convocatorias`.
 5. Cuando haya jugadores cargados, invitar a los participantes.
