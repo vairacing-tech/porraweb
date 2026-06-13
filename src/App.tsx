@@ -87,7 +87,7 @@ export function App() {
 
   useEffect(() => {
     if (!notice) return;
-    const timeoutId = window.setTimeout(() => setNotice(null), 3500);
+    const timeoutId = window.setTimeout(() => setNotice(null), 5000);
     return () => window.clearTimeout(timeoutId);
   }, [notice]);
 
@@ -228,7 +228,6 @@ export function App() {
       ) : null}
       <div className="content">
         <Header data={appData} onProfile={() => setTab("profile")} />
-        {notice ? <button className="notice" type="button" onClick={() => setNotice(null)}>{notice}</button> : null}
 
         {tab === "home" ? (
           <HomeView
@@ -259,6 +258,7 @@ export function App() {
           />
         ) : null}
       </div>
+      {notice ? <button className="notice" type="button" aria-live="polite" onClick={() => setNotice(null)}>{notice}</button> : null}
       <BottomNav active={tab} onChange={handleTabChange} />
       {selectedUserId ? <UserSummaryModal userId={selectedUserId} data={appData} onClose={() => setSelectedUserId(null)} /> : null}
     </main>
