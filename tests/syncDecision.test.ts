@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getResultSyncDecision } from "../src/server/sync";
+import { getResultSyncDecision, isLiveToFinishedTransition } from "../src/server/sync";
 import type { Env } from "../src/server/types";
 
 function envForDecision(input: { activeMatchId?: string | null; lastFullSyncAt?: string | null }): Env {
@@ -44,7 +44,7 @@ describe("result sync cadence decision", () => {
     });
   });
 
-  it("runs a full hourly sync during an active match when the last full sync is stale", async () => {
+  it("keeps active matches on live sync even when the last full sync is stale", async () => {
     const decision = await getResultSyncDecision(
       envForDecision({ activeMatchId: "match-live", lastFullSyncAt: "2026-06-13T18:59:59.000Z" }),
       new Date("2026-06-13T20:00:00.000Z")
@@ -52,9 +52,9 @@ describe("result sync cadence decision", () => {
 
     expect(decision).toMatchObject({
       shouldRun: true,
-      cadence: "hourly",
-      includeAuxiliaryData: true,
-      provider: "openligadb"
+      cadence: "live",
+      includeAuxiliaryData: false,
+      provider: "openligadb-live"
     });
   });
 
@@ -82,5 +82,12 @@ describe("result sync cadence decision", () => {
       includeAuxiliaryData: true,
       provider: "openligadb"
     });
+  });
+
+  it("only treats live to finished as a completion transition", () => {
+    expect(isLiveToFinishedTransition("live", "finished")).toBe(true);
+    expect(isLiveToFinishedTransition("scheduled", "finished")).toBe(false);
+    expect(isLiveToFinishedTransition("finished", "finished")).toBe(false);
+    expect(isLiveToFinishedTransition("live", "live")).toBe(false);
   });
 });

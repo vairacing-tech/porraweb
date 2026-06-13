@@ -31,6 +31,12 @@ type MatchSyncRow = {
   away_team_id: string;
 };
 
+type MatchApplyResult = {
+  linked: number;
+  updated: number;
+  finishedFromLive: number;
+};
+
 type ResultSyncMode = "force" | "adaptive";
 
 type ResultSyncDecision = {
@@ -192,8 +198,8 @@ export async function runResultSync(
 
 async function runOpenLigaDbResultSync(env: Env, decision: ResultSyncDecision): Promise<{ ok: boolean; requestsUsed: number; message: string }> {
   try {
-    const standingsUpdated = decision.includeAuxiliaryData ? await syncOpenLigaDbStandings(env) : 0;
-    const resolvedBefore = decision.includeAuxiliaryData ? await resolveKnockoutMatches(env) : 0;
+    let standingsUpdated = decision.includeAuxiliaryData ? await syncOpenLigaDbStandings(env) : 0;
+    let resolvedBefore = decision.includeAuxiliaryData ? await resolveKnockoutMatches(env) : 0;
     const targets = await getSyncMatchTargets(env);
     if (targets.length === 0) {
       const message = decision.includeAuxiliaryData
@@ -204,7 +210,7 @@ async function runOpenLigaDbResultSync(env: Env, decision: ResultSyncDecision): 
     }
 
     const teams = decision.includeAuxiliaryData ? await fetchOpenLigaDbTeams(env) : [];
-    const teamsUpdated = decision.includeAuxiliaryData ? await applyOpenLigaDbTeams(env, teams) : 0;
+    let teamsUpdated = decision.includeAuxiliaryData ? await applyOpenLigaDbTeams(env, teams) : 0;
     const targetMatchdays = targets.map((match) => match.matchday).filter((matchday): matchday is number => typeof matchday === "number");
     const matches = await fetchOpenLigaDbMatches(env, targetMatchdays);
 
@@ -215,13 +221,20 @@ async function runOpenLigaDbResultSync(env: Env, decision: ResultSyncDecision): 
     }
 
     const parsedMatches = matches.map(parseOpenLigaDbMatch);
-    const { linked, updated } = await applyOpenLigaDbMatches(env, parsedMatches, targets);
-    const resolvedAfter = decision.includeAuxiliaryData ? await resolveKnockoutMatches(env) : 0;
+    const { linked, updated, finishedFromLive } = await applyOpenLigaDbMatches(env, parsedMatches, targets);
+    const runCompletionFullSync = !decision.includeAuxiliaryData && finishedFromLive > 0;
+    if (runCompletionFullSync) {
+      standingsUpdated = await syncOpenLigaDbStandings(env);
+      resolvedBefore = await resolveKnockoutMatches(env);
+      teamsUpdated = await applyOpenLigaDbTeams(env, await fetchOpenLigaDbTeams(env));
+    }
+    const resolvedAfter = decision.includeAuxiliaryData || runCompletionFullSync ? await resolveKnockoutMatches(env) : 0;
     if (updated > 0) await safeEvaluateAchievements(env);
-    const message = decision.includeAuxiliaryData
+    const ranAuxiliaryData = decision.includeAuxiliaryData || runCompletionFullSync;
+    const message = ranAuxiliaryData
       ? `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado, clasificación mundial ${standingsUpdated} equipos, cruces resueltos ${resolvedBefore + resolvedAfter}.`
       : `OpenLigaDB live: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados.`;
-    await logSync(env, "ok", 0, message, decision.provider);
+    await logSync(env, "ok", 0, message, ranAuxiliaryData ? "openligadb" : decision.provider);
     return { ok: true, requestsUsed: 0, message };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error sincronizando OpenLigaDB.";
@@ -233,10 +246,7 @@ async function runOpenLigaDbResultSync(env: Env, decision: ResultSyncDecision): 
 
 export async function getResultSyncDecision(env: Env, now = new Date()): Promise<ResultSyncDecision> {
   const activeMatch = await getActiveSyncMatch(env, now);
-  const lastSyncAt = await getLastFullOpenLigaDbSyncAt(env);
-  const needsHourlySync = !lastSyncAt || now.getTime() - lastSyncAt.getTime() >= hourlySyncIntervalMs;
-
-  if (activeMatch && !needsHourlySync) {
+  if (activeMatch) {
     return {
       shouldRun: true,
       cadence: "live",
@@ -246,15 +256,16 @@ export async function getResultSyncDecision(env: Env, now = new Date()): Promise
     };
   }
 
+  const lastSyncAt = await getLastFullOpenLigaDbSyncAt(env);
+  const needsHourlySync = !lastSyncAt || now.getTime() - lastSyncAt.getTime() >= hourlySyncIntervalMs;
+
   if (needsHourlySync) {
     return {
       shouldRun: true,
       cadence: "hourly",
       includeAuxiliaryData: true,
       provider: "openligadb",
-      message: activeMatch
-        ? `Sincronización horaria durante partido en ventana: ${activeMatch.id}.`
-        : "Sincronización horaria sin partidos en curso."
+      message: "Sincronización horaria sin partidos en curso."
     };
   }
 
@@ -402,10 +413,11 @@ async function applyOpenLigaDbMatches(
   env: Env,
   parsedMatches: ParsedOpenLigaDbMatch[],
   targets: MatchSyncRow[]
-): Promise<{ linked: number; updated: number }> {
+): Promise<MatchApplyResult> {
   const squadNameCache = new Map<string, string[]>();
   let linked = 0;
   let updated = 0;
+  let finishedFromLive = 0;
 
   for (const parsed of parsedMatches) {
     const match = findMatchingOpenLigaDbTarget(targets, parsed);
@@ -448,13 +460,20 @@ async function applyOpenLigaDbMatches(
       match.penalty_home_score !== parsed.penaltyHomeScore ||
       match.penalty_away_score !== parsed.penaltyAwayScore;
     const finishedChanged = match.status !== "finished" && parsed.status === "finished";
+    if (isLiveToFinishedTransition(match.status, parsed.status)) {
+      finishedFromLive += 1;
+    }
     if (parsed.status === "finished" && parsed.homeScore !== null && parsed.awayScore !== null && (scoreChanged || finishedChanged)) {
       await recalculateMatch(env, match.id);
       updated += 1;
     }
   }
 
-  return { linked, updated };
+  return { linked, updated, finishedFromLive };
+}
+
+export function isLiveToFinishedTransition(previousStatus: string, nextStatus: string): boolean {
+  return previousStatus === "live" && nextStatus === "finished";
 }
 
 async function canonicalizeMatchGoals(
