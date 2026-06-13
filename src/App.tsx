@@ -53,6 +53,8 @@ type MyPrediction = { id: string; homeScore: number; awayScore: number; points: 
 
 type MatchFilter = "all" | "knockout" | `matchday-${number}`;
 
+type MatchScrollRequest = { id: number; matchId?: string | null };
+
 type WorldMode = "knockout" | "groups";
 
 type ScorerRow = {
@@ -79,7 +81,7 @@ export function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [phraseSessionSeed] = useState(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`);
-  const [matchScrollRequest, setMatchScrollRequest] = useState(0);
+  const [matchScrollRequest, setMatchScrollRequest] = useState<MatchScrollRequest>({ id: 0, matchId: null });
 
   useEffect(() => {
     void refresh();
@@ -171,9 +173,9 @@ export function App() {
     }
   }
 
-  function handleTabChange(nextTab: Tab) {
+  function handleTabChange(nextTab: Tab, targetMatchId?: string | null) {
     if (nextTab === "matches") {
-      setMatchScrollRequest((current) => current + 1);
+      setMatchScrollRequest((current) => ({ id: current.id + 1, matchId: targetMatchId ?? null }));
     }
     setTab(nextTab);
   }
@@ -239,6 +241,7 @@ export function App() {
             onSave={handleSave}
             refreshKey={data.now}
             onOpenMatches={() => handleTabChange("matches")}
+            onOpenMatch={(matchId) => handleTabChange("matches", matchId)}
             onOpenLeaderboard={() => handleTabChange("leaderboard")}
             onSelectUser={setSelectedUserId}
             phraseSessionSeed={phraseSessionSeed}
@@ -294,6 +297,7 @@ function HomeView({
   onSave,
   refreshKey,
   onOpenMatches,
+  onOpenMatch,
   onOpenLeaderboard,
   onSelectUser,
   phraseSessionSeed
@@ -306,6 +310,7 @@ function HomeView({
   onSave: (match: Match) => void;
   refreshKey: string;
   onOpenMatches: () => void;
+  onOpenMatch: (matchId: string) => void;
   onOpenLeaderboard: () => void;
   onSelectUser: (userId: string) => void;
   phraseSessionSeed: string;
@@ -327,7 +332,7 @@ function HomeView({
       ) : null}
       <section className="two-column">
         <LeaderboardCard rows={data.leaderboard.slice(0, 6)} onOpen={onOpenLeaderboard} onSelect={onSelectUser} />
-        <TodayCard matches={todayMatches} onOpen={onOpenMatches} />
+        <TodayCard matches={todayMatches} onOpen={onOpenMatches} onOpenMatch={onOpenMatch} />
       </section>
     </>
   );
@@ -484,7 +489,16 @@ function MatchGoals({ match, compact = false }: { match: Match; compact?: boolea
   if (!match.goals || match.goals.length === 0) return null;
   let previousHome = 0;
   let previousAway = 0;
-  const goals = match.goals.map((goal) => {
+  const orderedGoals = [...match.goals].sort((left, right) => {
+    const minuteDiff = (left.minute ?? 999) - (right.minute ?? 999);
+    if (minuteDiff !== 0) return minuteDiff;
+
+    const totalScoreDiff = left.homeScore + left.awayScore - (right.homeScore + right.awayScore);
+    if (totalScoreDiff !== 0) return totalScoreDiff;
+
+    return left.homeScore - right.homeScore || left.awayScore - right.awayScore;
+  });
+  const goals = orderedGoals.map((goal) => {
     const side = goal.homeScore > previousHome ? "home" : goal.awayScore > previousAway ? "away" : "unknown";
     previousHome = goal.homeScore;
     previousAway = goal.awayScore;
@@ -494,7 +508,7 @@ function MatchGoals({ match, compact = false }: { match: Match; compact?: boolea
   return (
     <div className={`goal-list ${compact ? "compact-goals" : ""}`}>
       {goals.map((goal, index) => (
-        <span className={`goal-item ${goal.side}`} key={`${match.id}-goal-${index}`}>
+        <span className={`goal-item ${goal.side}`} key={`${match.id}-goal-${index}`} style={compact ? undefined : { gridRow: index + 1 }}>
           {goal.minute ? `${goal.minute}' ` : ""}
           {formatGoal(goal)} · {goal.homeScore}-{goal.awayScore}
         </span>
@@ -614,7 +628,7 @@ function MatchesView({
   setScores: (setter: (current: ScoreDraft) => ScoreDraft) => void;
   onSave: (match: Match) => void;
   refreshKey: string;
-  scrollRequest: number;
+  scrollRequest: MatchScrollRequest;
 }) {
   const [filter, setFilter] = useState<MatchFilter>("all");
   const handledScrollRequestRef = useRef(0);
@@ -622,17 +636,17 @@ function MatchesView({
   const matches = useMemo(() => filterMatches(data.matches, filter), [data.matches, filter]);
 
   useEffect(() => {
-    if (scrollRequest === 0 || handledScrollRequestRef.current === scrollRequest) return;
-    const target = getLastFinishedMatch(matches) ?? matches[0] ?? null;
+    if (scrollRequest.id === 0 || handledScrollRequestRef.current === scrollRequest.id) return;
+    const target = (scrollRequest.matchId ? matches.find((match) => match.id === scrollRequest.matchId) : null) ?? getLastFinishedMatch(matches) ?? matches[0] ?? null;
     if (!target) return;
-    handledScrollRequestRef.current = scrollRequest;
+    handledScrollRequestRef.current = scrollRequest.id;
 
     const timeoutId = window.setTimeout(() => {
       document.getElementById(matchCardDomId(target.id))?.scrollIntoView({ behavior: "smooth", block: "start" });
     }, 80);
 
     return () => window.clearTimeout(timeoutId);
-  }, [matches, scrollRequest]);
+  }, [matches, scrollRequest.id, scrollRequest.matchId]);
 
   return (
     <section className="view-stack">
@@ -1531,7 +1545,7 @@ function LeaderboardRows({
   );
 }
 
-function TodayCard({ matches, onOpen }: { matches: Match[]; onOpen: () => void }) {
+function TodayCard({ matches, onOpen, onOpenMatch }: { matches: Match[]; onOpen: () => void; onOpenMatch: (matchId: string) => void }) {
   return (
     <section className="card mini-card">
       <div className="section-title">
@@ -1540,7 +1554,7 @@ function TodayCard({ matches, onOpen }: { matches: Match[]; onOpen: () => void }
       </div>
       <div className="today-list">
         {matches.map((match) => (
-          <div className="today-row" key={match.id}>
+          <button className="today-row" type="button" key={match.id} onClick={() => onOpenMatch(match.id)}>
             <TeamBadge team={match.homeTeam} />
             <span>{shortTeam(match.homeTeam.name)}</span>
             <small>vs</small>
@@ -1548,7 +1562,7 @@ function TodayCard({ matches, onOpen }: { matches: Match[]; onOpen: () => void }
             <TeamBadge team={match.awayTeam} />
             <em>{matchSummary(match)} · {formatDate(match.kickoffAt)} · {formatTime(match.kickoffAt)}</em>
             {match.isDoublePoints ? <b className="x2-mini">x2</b> : null}
-          </div>
+          </button>
         ))}
       </div>
       <button className="link-button" type="button" onClick={onOpen}>Ver todos los partidos</button>

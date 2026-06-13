@@ -645,6 +645,12 @@ button {
   text-align: right;
 }
 
+.goal-item.unknown {
+  grid-column: 1 / -1;
+  justify-self: stretch;
+  text-align: center;
+}
+
 .compact-goals {
   width: min(100%, 320px);
   margin: 10px auto 0;
@@ -657,7 +663,8 @@ button {
 }
 
 .compact-goals .goal-item.home,
-.compact-goals .goal-item.away {
+.compact-goals .goal-item.away,
+.compact-goals .goal-item.unknown {
   grid-column: 1;
   text-align: center;
 }
@@ -864,13 +871,29 @@ button {
   grid-template-columns: 30px minmax(0, 1fr) auto minmax(0, 1fr) 30px;
   align-items: center;
   gap: 5px;
+  width: 100%;
   min-height: 42px;
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: white;
+  color: inherit;
+  cursor: pointer;
   font-size: 11px;
   font-weight: 800;
+  font-family: inherit;
+  text-align: left;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.today-row:active {
+  background: rgba(20, 120, 50, 0.08);
+}
+
+.today-row:focus-visible {
+  outline: 2px solid rgba(26, 138, 61, 0.45);
+  outline-offset: 2px;
 }
 
 .today-row span {
