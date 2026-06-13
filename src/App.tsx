@@ -63,6 +63,8 @@ type ScorerRow = {
   goals: number;
 };
 
+const matchDeepLinkTopOffsetPx = 96;
+
 type KnockoutRoundGroup = {
   stage: MatchStage;
   label: string;
@@ -644,10 +646,17 @@ function MatchesView({
       const targetElement = document.getElementById(matchCardDomId(target.id));
       if (!targetElement) return;
       handledScrollRequestRef.current = scrollRequest.id;
-      scrollElementIntoAppView(targetElement);
+      scrollElementIntoAppView(targetElement, matchDeepLinkTopOffsetPx);
     }, 80);
+    const settleTimeoutId = window.setTimeout(() => {
+      const targetElement = document.getElementById(matchCardDomId(target.id));
+      if (targetElement) scrollElementIntoAppView(targetElement, matchDeepLinkTopOffsetPx);
+    }, 420);
 
-    return () => window.clearTimeout(timeoutId);
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.clearTimeout(settleTimeoutId);
+    };
   }, [matches, scrollRequest.id, scrollRequest.matchId]);
 
   return (
@@ -1705,7 +1714,7 @@ function matchCardDomId(matchId: string): string {
   return `match-card-${matchId}`;
 }
 
-function scrollElementIntoAppView(element: HTMLElement): void {
+function scrollElementIntoAppView(element: HTMLElement, topOffset = 0): void {
   const scrollContainer = element.closest(".app-shell") as HTMLElement | null;
   if (!scrollContainer) {
     element.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -1714,7 +1723,7 @@ function scrollElementIntoAppView(element: HTMLElement): void {
 
   const containerTop = scrollContainer.getBoundingClientRect().top;
   const elementTop = element.getBoundingClientRect().top;
-  const scrollTop = scrollContainer.scrollTop + elementTop - containerTop - 8;
+  const scrollTop = scrollContainer.scrollTop + elementTop - containerTop - topOffset;
   scrollContainer.scrollTo({ top: Math.max(0, scrollTop), behavior: "smooth" });
 }
 

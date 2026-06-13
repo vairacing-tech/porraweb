@@ -31,6 +31,22 @@ type MatchSyncRow = {
   away_team_id: string;
 };
 
+type ResultSyncMode = "force" | "adaptive";
+
+type ResultSyncDecision = {
+  shouldRun: boolean;
+  cadence: "live" | "hourly" | "recent";
+  includeAuxiliaryData: boolean;
+  provider: "openligadb" | "openligadb-live";
+  message: string;
+};
+
+const syncTargetLookbehindMs = 7 * 60 * 60 * 1000;
+const syncTargetLookaheadMs = 3 * 60 * 60 * 1000;
+const activeMatchLookbehindMs = 7 * 60 * 60 * 1000;
+const activeMatchLookaheadMs = 15 * 60 * 1000;
+const hourlySyncIntervalMs = 60 * 60 * 1000;
+
 const providerNameToTeamId: Record<string, string> = {
   "algeria": "argelia",
   "algerien": "argelia",
@@ -150,47 +166,106 @@ export async function runSquadSync(env: Env): Promise<{ ok: boolean; requestsUse
   return { ok: false, requestsUsed: 0, message };
 }
 
-export async function runResultSync(env: Env): Promise<{ ok: boolean; requestsUsed: number; message: string }> {
-  return runOpenLigaDbResultSync(env);
-}
-
-async function runOpenLigaDbResultSync(env: Env): Promise<{ ok: boolean; requestsUsed: number; message: string }> {
+export async function runResultSync(
+  env: Env,
+  options: { mode?: ResultSyncMode } = {}
+): Promise<{ ok: boolean; requestsUsed: number; message: string }> {
   await ensureSeeded(env);
 
+  const decision =
+    options.mode === "adaptive"
+      ? await getResultSyncDecision(env)
+      : {
+          shouldRun: true,
+          cadence: "hourly",
+          includeAuxiliaryData: true,
+          provider: "openligadb",
+          message: "Sincronizacion manual."
+        } satisfies ResultSyncDecision;
+
+  if (!decision.shouldRun) {
+    return { ok: true, requestsUsed: 0, message: decision.message };
+  }
+
+  return runOpenLigaDbResultSync(env, decision);
+}
+
+async function runOpenLigaDbResultSync(env: Env, decision: ResultSyncDecision): Promise<{ ok: boolean; requestsUsed: number; message: string }> {
   try {
-    const standingsUpdated = await syncOpenLigaDbStandings(env);
-    const resolvedBefore = await resolveKnockoutMatches(env);
+    const standingsUpdated = decision.includeAuxiliaryData ? await syncOpenLigaDbStandings(env) : 0;
+    const resolvedBefore = decision.includeAuxiliaryData ? await resolveKnockoutMatches(env) : 0;
     const targets = await getSyncMatchTargets(env);
     if (targets.length === 0) {
-      const message = `Clasificación mundial actualizada: ${standingsUpdated} equipos, cruces resueltos: ${resolvedBefore}. No hay partidos no finalizados en la ventana de sincronización.`;
-      await logSync(env, "skipped", 0, message, "openligadb");
+      const message = decision.includeAuxiliaryData
+        ? `Clasificación mundial actualizada: ${standingsUpdated} equipos, cruces resueltos: ${resolvedBefore}. No hay partidos no finalizados en la ventana de sincronización.`
+        : "No hay partidos no finalizados en la ventana de sincronización live.";
+      await logSync(env, "skipped", 0, message, decision.provider);
       return { ok: true, requestsUsed: 0, message };
     }
 
-    const teams = await fetchOpenLigaDbTeams(env);
-    const teamsUpdated = await applyOpenLigaDbTeams(env, teams);
+    const teams = decision.includeAuxiliaryData ? await fetchOpenLigaDbTeams(env) : [];
+    const teamsUpdated = decision.includeAuxiliaryData ? await applyOpenLigaDbTeams(env, teams) : 0;
     const targetMatchdays = targets.map((match) => match.matchday).filter((matchday): matchday is number => typeof matchday === "number");
     const matches = await fetchOpenLigaDbMatches(env, targetMatchdays);
 
     if (matches.length === 0) {
       const message = "OpenLigaDB no devolvio partidos para la configuracion actual.";
-      await logSync(env, "skipped", 0, message, "openligadb");
+      await logSync(env, "skipped", 0, message, decision.provider);
       return { ok: true, requestsUsed: 0, message };
     }
 
     const parsedMatches = matches.map(parseOpenLigaDbMatch);
     const { linked, updated } = await applyOpenLigaDbMatches(env, parsedMatches, targets);
-    const resolvedAfter = await resolveKnockoutMatches(env);
+    const resolvedAfter = decision.includeAuxiliaryData ? await resolveKnockoutMatches(env) : 0;
     if (updated > 0) await safeEvaluateAchievements(env);
-    const message = `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado, clasificación mundial ${standingsUpdated} equipos, cruces resueltos ${resolvedBefore + resolvedAfter}.`;
-    await logSync(env, "ok", 0, message, "openligadb");
+    const message = decision.includeAuxiliaryData
+      ? `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado, clasificación mundial ${standingsUpdated} equipos, cruces resueltos ${resolvedBefore + resolvedAfter}.`
+      : `OpenLigaDB live: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados.`;
+    await logSync(env, "ok", 0, message, decision.provider);
     return { ok: true, requestsUsed: 0, message };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Error sincronizando OpenLigaDB.";
     console.error("OPENLIGADB SYNC ERROR", error);
-    await logSync(env, "error", 0, message, "openligadb");
+    await logSync(env, "error", 0, message, decision.provider);
     return { ok: false, requestsUsed: 0, message };
   }
+}
+
+export async function getResultSyncDecision(env: Env, now = new Date()): Promise<ResultSyncDecision> {
+  const activeMatch = await getActiveSyncMatch(env, now);
+  const lastSyncAt = await getLastFullOpenLigaDbSyncAt(env);
+  const needsHourlySync = !lastSyncAt || now.getTime() - lastSyncAt.getTime() >= hourlySyncIntervalMs;
+
+  if (activeMatch && !needsHourlySync) {
+    return {
+      shouldRun: true,
+      cadence: "live",
+      includeAuxiliaryData: false,
+      provider: "openligadb-live",
+      message: `Sincronización live por partido en ventana: ${activeMatch.id}.`
+    };
+  }
+
+  if (needsHourlySync) {
+    return {
+      shouldRun: true,
+      cadence: "hourly",
+      includeAuxiliaryData: true,
+      provider: "openligadb",
+      message: activeMatch
+        ? `Sincronización horaria durante partido en ventana: ${activeMatch.id}.`
+        : "Sincronización horaria sin partidos en curso."
+    };
+  }
+
+  const nextHourlyAt = new Date(lastSyncAt.getTime() + hourlySyncIntervalMs);
+  return {
+    shouldRun: false,
+    cadence: "recent",
+    includeAuxiliaryData: false,
+    provider: "openligadb",
+    message: `Sync omitido: no hay partidos en curso y el último sync horario fue a ${lastSyncAt.toISOString()}. Próximo desde ${nextHourlyAt.toISOString()}.`
+  };
 }
 
 async function getLocalSquadSummary(env: Env): Promise<{ players: number; teams: number }> {
@@ -420,10 +495,40 @@ async function getSquadNames(env: Env, teamId: string, squadNameCache: Map<strin
   return names;
 }
 
+async function getActiveSyncMatch(env: Env, now: Date): Promise<{ id: string } | null> {
+  const from = new Date(now.getTime() - activeMatchLookbehindMs).toISOString();
+  const to = new Date(now.getTime() + activeMatchLookaheadMs).toISOString();
+  return await env.DB.prepare(
+    `SELECT id
+     FROM matches
+     WHERE status <> 'finished'
+       AND (status = 'live' OR kickoff_at BETWEEN ?1 AND ?2)
+     ORDER BY kickoff_at ASC
+     LIMIT 1`
+  )
+    .bind(from, to)
+    .first<{ id: string }>();
+}
+
+async function getLastFullOpenLigaDbSyncAt(env: Env): Promise<Date | null> {
+  const row = await env.DB.prepare(
+    `SELECT finished_at
+     FROM sync_runs
+     WHERE provider = 'openligadb'
+       AND finished_at IS NOT NULL
+     ORDER BY finished_at DESC
+     LIMIT 1`
+  ).first<{ finished_at: string }>();
+
+  if (!row?.finished_at) return null;
+  const value = new Date(row.finished_at);
+  return Number.isNaN(value.getTime()) ? null : value;
+}
+
 async function getSyncMatchTargets(env: Env): Promise<MatchSyncRow[]> {
   const now = Date.now();
-  const from = new Date(now - 7 * 60 * 60 * 1000).toISOString();
-  const to = new Date(now + 3 * 60 * 60 * 1000).toISOString();
+  const from = new Date(now - syncTargetLookbehindMs).toISOString();
+  const to = new Date(now + syncTargetLookaheadMs).toISOString();
   const { results } = await env.DB.prepare(
     `SELECT id, api_fixture_id, kickoff_at, matchday, status,
             home_score, away_score, extra_home_score, extra_away_score,
