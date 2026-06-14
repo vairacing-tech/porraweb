@@ -9,10 +9,26 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
   </React.StrictMode>
 );
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("/sw.js").catch((error) => {
-      console.error("No se pudo registrar el service worker", error);
-    });
-  });
+async function removeLegacyServiceWorkers() {
+  if (!("serviceWorker" in navigator)) return;
+
+  try {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(registrations.map((registration) => registration.unregister()));
+  } catch (error) {
+    console.error("No se pudo desregistrar el service worker", error);
+  }
+
+  if (!("caches" in window)) return;
+
+  try {
+    const keys = await caches.keys();
+    await Promise.all(keys.map((key) => caches.delete(key)));
+  } catch (error) {
+    console.error("No se pudo limpiar la cache de la app", error);
+  }
 }
+
+window.addEventListener("load", () => {
+  void removeLegacyServiceWorkers();
+});
