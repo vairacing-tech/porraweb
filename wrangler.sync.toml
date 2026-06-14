@@ -14,5 +14,5 @@ OPENLIGADB_SEASON = "2026"
 
 [triggers]
 crons = [
-  "*/5 * * * *"
+  "* * * * *"
 ]
