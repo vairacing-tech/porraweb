@@ -73,16 +73,27 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
     }
 
     if (segments[0] === "bootstrap" && method === "GET") {
-      if (user) await safeEvaluateAchievements(env);
-      const matches = await getMatches(env, user?.id);
-      const leaderboard = await getLeaderboard(env);
-      const teams = await getTeams(env);
-      const squadPlayers = await getSquadPlayers(env);
-      const worldStandings = await getWorldStandings(env);
-      const bonus = user ? await getBonus(env, user.id) : null;
-      const achievements = user ? await safeGetUserAchievements(env, user.id) : [];
-      const adminUsers = user?.isAdmin ? await getLeagueUsers(env) : undefined;
-      const adminPredictions = user?.isAdmin ? await getLeaguePredictions(env) : undefined;
+      const [
+        matches,
+        leaderboard,
+        teams,
+        squadPlayers,
+        worldStandings,
+        bonus,
+        achievements,
+        adminUsers,
+        adminPredictions
+      ] = await Promise.all([
+        getMatches(env, user?.id),
+        getLeaderboard(env),
+        getTeams(env),
+        getSquadPlayers(env),
+        getWorldStandings(env),
+        user ? getBonus(env, user.id) : Promise.resolve(null),
+        user ? safeGetUserAchievements(env, user.id) : Promise.resolve([]),
+        user?.isAdmin ? getLeagueUsers(env) : Promise.resolve(undefined),
+        user?.isAdmin ? getLeaguePredictions(env) : Promise.resolve(undefined)
+      ]);
       const now = new Date().toISOString();
       const nowMs = Date.now();
       const currentWindowMs = 3 * 60 * 60 * 1000;

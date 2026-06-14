@@ -160,19 +160,28 @@ export async function setDoublePoints(matchId: string, isDoublePoints: boolean):
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(path, {
-      credentials: "include",
-      headers: {
-        "content-type": "application/json",
-        ...(init.headers || {})
-      },
-      ...init
-    });
-  } catch {
-    throw new Error("No se pudo conectar con la API. Reintenta en unos segundos.");
+  const method = (init.method || "GET").toUpperCase();
+  const maxAttempts = method === "GET" ? 3 : 1;
+  let response: Response | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      response = await fetch(path, {
+        credentials: "include",
+        headers: {
+          "content-type": "application/json",
+          ...(init.headers || {})
+        },
+        ...init
+      });
+      break;
+    } catch {
+      if (attempt === maxAttempts) {
+        throw new Error("No se pudo conectar con la API. Reintenta en unos segundos.");
+      }
+      await wait(500 * attempt);
+    }
   }
+  if (!response) throw new Error("No se pudo conectar con la API. Reintenta en unos segundos.");
 
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
@@ -184,4 +193,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     throw new Error(data.error || "Error de red.");
   }
   return data as T;
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
