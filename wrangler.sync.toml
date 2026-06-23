@@ -2,6 +2,10 @@ name = "porra-fortilin-sync"
 main = "workers/sync.ts"
 compatibility_date = "2026-06-11"
 
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [[d1_databases]]
 binding = "DB"
 database_name = "porra-fortilin"

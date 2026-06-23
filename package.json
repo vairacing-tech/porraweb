@@ -14,7 +14,7 @@
     "cf:migrate:remote": "wrangler d1 migrations apply porra-fortilin --remote",
     "cf:deploy": "wrangler pages deploy dist --project-name porra-fortilin",
     "cf:deploy:app": "wrangler deploy --config wrangler.app.toml",
-    "cf:deploy:sync": "wrangler deploy --config wrangler.sync.toml"
+    "cf:deploy:sync": "wrangler deploy --config wrangler.sync.toml && wrangler triggers deploy --config wrangler.sync.toml"
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.4",
