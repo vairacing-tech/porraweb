@@ -639,7 +639,13 @@ function MatchesView({
 
   useEffect(() => {
     if (scrollRequest.id === 0 || handledScrollRequestRef.current === scrollRequest.id) return;
-    const target = (scrollRequest.matchId ? matches.find((match) => match.id === scrollRequest.matchId) : null) ?? getLastFinishedMatch(matches) ?? matches[0] ?? null;
+    const target =
+      (scrollRequest.matchId ? matches.find((match) => match.id === scrollRequest.matchId) : null) ??
+      getNextUnstartedMatch(matches) ??
+      findCurrentMatch(matches) ??
+      getLastFinishedMatch(matches) ??
+      matches[0] ??
+      null;
     if (!target) return;
 
     const timeoutId = window.setTimeout(() => {
@@ -1708,6 +1714,11 @@ function filterMatches<T extends Match>(matches: T[], filter: MatchFilter): T[] 
 
 function getLastFinishedMatch<T extends Match>(matches: T[]): T | null {
   return [...matches].reverse().find((match) => match.status === "finished") ?? null;
+}
+
+function getNextUnstartedMatch<T extends Match>(matches: T[], now = new Date()): T | null {
+  const nowMs = now.getTime();
+  return sortMatchesByKickoff(matches).find((match) => match.status !== "finished" && match.status !== "live" && new Date(match.kickoffAt).getTime() > nowMs) ?? null;
 }
 
 function matchCardDomId(matchId: string): string {

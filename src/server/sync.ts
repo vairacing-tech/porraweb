@@ -29,6 +29,7 @@ type MatchSyncRow = {
   extra_away_score: number | null;
   penalty_home_score: number | null;
   penalty_away_score: number | null;
+  goals_json: string | null;
   home_team_id: string;
   away_team_id: string;
 };
@@ -51,6 +52,7 @@ type ResultSyncDecision = {
 };
 
 const syncTargetLookbehindMs = 7 * 60 * 60 * 1000;
+const finishedCorrectionLookbehindMs = 48 * 60 * 60 * 1000;
 const syncTargetLookaheadMs = 3 * 60 * 60 * 1000;
 const activeMatchLookbehindMs = 7 * 60 * 60 * 1000;
 const activeMatchLookaheadMs = 15 * 60 * 1000;
@@ -438,34 +440,10 @@ async function applyOpenLigaDbMatches(
     const match = findMatchingOpenLigaDbTarget(targets, parsed);
     if (!match) continue;
 
-    const goals = await canonicalizeMatchGoals(env, match, parsed.goals, squadNameCache);
+    const incomingGoals = await canonicalizeMatchGoals(env, match, parsed.goals, squadNameCache);
+    const goals = selectBestGoalTimeline(parseStoredMatchGoals(match.goals_json), incomingGoals, parsed);
+    const goalsJson = JSON.stringify(goals);
     const now = new Date().toISOString();
-    await env.DB.prepare(
-      `UPDATE matches
-       SET api_fixture_id = ?1, kickoff_at = ?2, lock_at = ?3, status = ?4,
-           home_score = ?5, away_score = ?6,
-           extra_home_score = ?7, extra_away_score = ?8,
-           penalty_home_score = ?9, penalty_away_score = ?10,
-           goals_json = ?11, updated_at = ?12
-       WHERE id = ?13`
-    )
-      .bind(
-        parsed.providerMatchId,
-        parsed.kickoffAt,
-        parsed.lockAt,
-        parsed.status,
-        parsed.homeScore,
-        parsed.awayScore,
-        parsed.extraHomeScore,
-        parsed.extraAwayScore,
-        parsed.penaltyHomeScore,
-        parsed.penaltyAwayScore,
-        JSON.stringify(goals),
-        now,
-        match.id
-      )
-      .run();
-
     linked += 1;
     const scoreChanged =
       match.home_score !== parsed.homeScore ||
@@ -474,7 +452,43 @@ async function applyOpenLigaDbMatches(
       match.extra_away_score !== parsed.extraAwayScore ||
       match.penalty_home_score !== parsed.penaltyHomeScore ||
       match.penalty_away_score !== parsed.penaltyAwayScore;
+    const goalsChanged = (match.goals_json ?? "[]") !== goalsJson;
     const finishedChanged = match.status !== "finished" && parsed.status === "finished";
+    const metadataChanged =
+      match.api_fixture_id !== parsed.providerMatchId ||
+      match.kickoff_at !== parsed.kickoffAt ||
+      match.status !== parsed.status;
+
+    if (scoreChanged || goalsChanged || finishedChanged || metadataChanged) {
+      await env.DB.prepare(
+        `UPDATE matches
+         SET api_fixture_id = ?1, kickoff_at = ?2, lock_at = ?3, status = ?4,
+             home_score = ?5, away_score = ?6,
+             extra_home_score = ?7, extra_away_score = ?8,
+             penalty_home_score = ?9, penalty_away_score = ?10,
+             goals_json = ?11, updated_at = ?12
+         WHERE id = ?13`
+      )
+        .bind(
+          parsed.providerMatchId,
+          parsed.kickoffAt,
+          parsed.lockAt,
+          parsed.status,
+          parsed.homeScore,
+          parsed.awayScore,
+          parsed.extraHomeScore,
+          parsed.extraAwayScore,
+          parsed.penaltyHomeScore,
+          parsed.penaltyAwayScore,
+          goalsJson,
+          now,
+          match.id
+        )
+        .run();
+
+      updated += 1;
+    }
+
     if (isLiveToFinishedTransition(match.status, parsed.status)) {
       finishedFromLive += 1;
     }
@@ -492,7 +506,6 @@ async function applyOpenLigaDbMatches(
     }
     if (parsed.status === "finished" && parsed.homeScore !== null && parsed.awayScore !== null && (scoreChanged || finishedChanged)) {
       await recalculateMatch(env, match.id);
-      updated += 1;
     }
   }
 
@@ -537,6 +550,70 @@ async function canonicalizeMatchGoals(
   }
 
   return normalized;
+}
+
+export function selectBestGoalTimeline(existing: MatchGoal[], incoming: MatchGoal[], parsed: ParsedOpenLigaDbMatch): MatchGoal[] {
+  if (existing.length === 0) return incoming;
+  if (incoming.length === 0) return existing;
+
+  const finalScore =
+    parsed.homeScore !== null && parsed.awayScore !== null
+      ? { homeScore: parsed.homeScore, awayScore: parsed.awayScore }
+      : null;
+  const existingScore = goalTimelineCompleteness(existing, finalScore);
+  const incomingScore = goalTimelineCompleteness(incoming, finalScore);
+  return incomingScore >= existingScore ? incoming : existing;
+}
+
+function goalTimelineCompleteness(goals: MatchGoal[], finalScore: Pick<MatchGoal, "homeScore" | "awayScore"> | null): number {
+  const namedGoals = goals.filter((goal) => goal.scorerName && goal.scorerName !== "Gol por confirmar").length;
+  let score = goals.length * 10 + namedGoals;
+  if (finalScore) {
+    const expectedGoals = finalScore.homeScore + finalScore.awayScore;
+    const quality = analyzeGoalTimeline(goals, finalScore);
+    if (quality.isValid) score += 10_000;
+    if (goals.length === expectedGoals) score += 5_000;
+    score -= Math.abs(goals.length - expectedGoals) * 1_000;
+    if (quality.endsAtFinalScore) score += 500;
+  }
+  return score;
+}
+
+function analyzeGoalTimeline(goals: MatchGoal[], finalScore: Pick<MatchGoal, "homeScore" | "awayScore">): { isValid: boolean; endsAtFinalScore: boolean } {
+  let previousHome = 0;
+  let previousAway = 0;
+
+  for (const goal of goals) {
+    const homeDelta = goal.homeScore - previousHome;
+    const awayDelta = goal.awayScore - previousAway;
+    if (homeDelta < 0 || awayDelta < 0 || homeDelta + awayDelta !== 1) {
+      return { isValid: false, endsAtFinalScore: false };
+    }
+    previousHome = goal.homeScore;
+    previousAway = goal.awayScore;
+  }
+
+  return {
+    isValid: true,
+    endsAtFinalScore: previousHome === finalScore.homeScore && previousAway === finalScore.awayScore
+  };
+}
+
+function parseStoredMatchGoals(value: string | null): MatchGoal[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as MatchGoal[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (goal) =>
+        typeof goal.homeScore === "number" &&
+        typeof goal.awayScore === "number" &&
+        (typeof goal.minute === "number" || goal.minute === null) &&
+        (typeof goal.scorerName === "string" || goal.scorerName === null)
+    );
+  } catch {
+    return [];
+  }
 }
 
 async function canonicalizeScorerName(env: Env, teamId: string, name: string, squadNameCache: Map<string, string[]>): Promise<string> {
@@ -589,17 +666,25 @@ async function getLastFullOpenLigaDbSyncAt(env: Env): Promise<Date | null> {
 async function getSyncMatchTargets(env: Env): Promise<MatchSyncRow[]> {
   const now = Date.now();
   const from = new Date(now - syncTargetLookbehindMs).toISOString();
+  const finishedFrom = new Date(now - finishedCorrectionLookbehindMs).toISOString();
   const to = new Date(now + syncTargetLookaheadMs).toISOString();
+  const nowIso = new Date(now).toISOString();
   const { results } = await env.DB.prepare(
     `SELECT id, api_fixture_id, stage, kickoff_at, matchday, group_name, status,
             home_score, away_score, extra_home_score, extra_away_score,
-            penalty_home_score, penalty_away_score, home_team_id, away_team_id
+            penalty_home_score, penalty_away_score, goals_json, home_team_id, away_team_id
      FROM matches
-     WHERE status <> 'finished'
+     WHERE (
+       status <> 'finished'
        AND kickoff_at BETWEEN ?1 AND ?2
+     )
+     OR (
+       status = 'finished'
+       AND kickoff_at BETWEEN ?3 AND ?4
+     )
      ORDER BY kickoff_at ASC`
   )
-    .bind(from, to)
+    .bind(from, to, finishedFrom, nowIso)
     .all<MatchSyncRow>();
   return results;
 }

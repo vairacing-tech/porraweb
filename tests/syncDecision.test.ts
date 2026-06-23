@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { getResultSyncDecision, isLiveToFinishedTransition, shouldRefreshGroupStandingsForMatch } from "../src/server/sync";
+import { getResultSyncDecision, isLiveToFinishedTransition, selectBestGoalTimeline, shouldRefreshGroupStandingsForMatch } from "../src/server/sync";
+import type { MatchGoal } from "../src/shared/types";
+import type { ParsedOpenLigaDbMatch } from "../src/server/providers/openligadb";
 import type { Env } from "../src/server/types";
 
 function envForDecision(input: { activeMatchId?: string | null; lastFullSyncAt?: string | null }): Env {
@@ -134,4 +136,75 @@ describe("result sync cadence decision", () => {
       })
     ).toBe(false);
   });
+
+  it("replaces a corrupted stored goal timeline with a valid provider timeline", () => {
+    const corruptedStoredGoals = [
+      goal(58, "Gol por confirmar", 1, 0),
+      goal(58, "Gol por confirmar", 2, 0),
+      goal(58, "Gol por confirmar", 2, 1),
+      goal(58, null, 3, 1),
+      goal(null, null, 1, 0),
+      goal(null, null, 2, 0),
+      goal(null, null, 2, 1),
+      goal(null, "Gol por confirmar", 2, 2),
+      goal(null, null, 3, 2)
+    ];
+    const providerGoals = [
+      goal(43, "Marcus Pedersen", 1, 0),
+      goal(48, "Erling Haaland", 2, 0),
+      goal(53, "Ismaila Sarr", 2, 1),
+      goal(58, "Erling Haaland", 3, 1),
+      goal(93, "Ismaila Sarr", 3, 2, true)
+    ];
+
+    expect(selectBestGoalTimeline(corruptedStoredGoals, providerGoals, parsedScore(3, 2))).toBe(providerGoals);
+  });
+
+  it("keeps a complete stored goal timeline when the provider returns a partial one", () => {
+    const completeStoredGoals = [
+      goal(51, "Virgil van Dijk", 1, 0),
+      goal(57, "Keito Nakamuro", 1, 1),
+      goal(64, "Crysencio Summerville", 2, 1),
+      goal(88, "Daichi Kamada", 2, 2)
+    ];
+    const partialProviderGoals = [
+      goal(51, "Virgil van Dijk", 1, 0),
+      goal(57, "Keito Nakamuro", 1, 1)
+    ];
+
+    expect(selectBestGoalTimeline(completeStoredGoals, partialProviderGoals, parsedScore(2, 2))).toBe(completeStoredGoals);
+  });
 });
+
+function goal(minute: number | null, scorerName: string | null, homeScore: number, awayScore: number, isOvertime = false): MatchGoal {
+  return {
+    minute,
+    scorerName,
+    homeScore,
+    awayScore,
+    isPenalty: false,
+    isOwnGoal: false,
+    isOvertime
+  };
+}
+
+function parsedScore(homeScore: number, awayScore: number): ParsedOpenLigaDbMatch {
+  return {
+    providerMatchId: 0,
+    kickoffAt: "2026-06-23T00:00:00.000Z",
+    lockAt: "2026-06-22T22:00:00.000Z",
+    homeTeam: { id: "home", name: "Home", shortCode: "HOM" },
+    awayTeam: { id: "away", name: "Away", shortCode: "AWA" },
+    round: "Test",
+    matchday: 2,
+    groupName: "Grupo I",
+    status: "finished",
+    homeScore,
+    awayScore,
+    extraHomeScore: null,
+    extraAwayScore: null,
+    penaltyHomeScore: null,
+    penaltyAwayScore: null,
+    goals: []
+  };
+}

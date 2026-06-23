@@ -47,7 +47,59 @@ describe("OpenLigaDB provider", () => {
     });
     expect(parsed.goals).toEqual([
       { minute: 22, scorerName: "Jugador Uno", homeScore: 1, awayScore: 0, isPenalty: false, isOwnGoal: false, isOvertime: false },
-      { minute: 48, scorerName: "Jugador Dos", homeScore: 2, awayScore: 0, isPenalty: false, isOwnGoal: false, isOvertime: false }
+      { minute: 48, scorerName: "Jugador Dos", homeScore: 2, awayScore: 0, isPenalty: false, isOwnGoal: false, isOvertime: false },
+      { minute: null, scorerName: "Gol por confirmar", homeScore: 2, awayScore: 1, isPenalty: false, isOwnGoal: false, isOvertime: false }
+    ]);
+  });
+
+  it("sorts OpenLigaDB goals and fills missing cumulative score steps", () => {
+    const parsed = parseOpenLigaDbMatch({
+      matchID: 80110,
+      matchDateTime: "2026-06-15T04:00:00",
+      matchDateTimeUTC: "2026-06-15T02:00:00Z",
+      matchIsFinished: true,
+      team1: { teamName: "Schweden", shortName: "SWE" },
+      team2: { teamName: "Tunesien", shortName: "TUN" },
+      group: { groupName: "1. Runde", groupOrderID: 1 },
+      matchResults: [
+        { resultTypeID: 1, resultName: "Halbzeit", pointsTeam1: 2, pointsTeam2: 1 },
+        { resultTypeID: 2, resultName: "Endergebnis", pointsTeam1: 5, pointsTeam2: 1 }
+      ],
+      goals: [
+        { scoreTeam1: 3, scoreTeam2: 1, matchMinute: 59, goalGetterName: "Viktor Gyokeres" },
+        { scoreTeam1: 1, scoreTeam2: 0, matchMinute: 7, goalGetterName: "Yasin Ayari" },
+        { scoreTeam1: 5, scoreTeam2: 1, matchMinute: 96, goalGetterName: "Yasin Ayari", isOvertime: true },
+        { scoreTeam1: 2, scoreTeam2: 0, matchMinute: 30, goalGetterName: "Alexander Isak" },
+        { scoreTeam1: 2, scoreTeam2: 1, matchMinute: 43, goalGetterName: "Omar Rekik" },
+        { scoreTeam1: 4, scoreTeam2: 1, matchMinute: 86, goalGetterName: "Mattias Svanberg" }
+      ]
+    });
+
+    expect(parsed.goals.map((goal) => `${goal.homeScore}-${goal.awayScore}`)).toEqual(["1-0", "2-0", "2-1", "3-1", "4-1", "5-1"]);
+    expect(parsed.goals[2]).toMatchObject({ minute: 43, scorerName: "Omar Rekik", homeScore: 2, awayScore: 1 });
+  });
+
+  it("fills placeholder goals up to the final score when the provider goal list is incomplete", () => {
+    const parsed = parseOpenLigaDbMatch({
+      matchID: 80108,
+      matchDateTime: "2026-06-14T22:00:00",
+      matchDateTimeUTC: "2026-06-14T20:00:00Z",
+      matchIsFinished: true,
+      team1: { teamName: "Niederlande", shortName: "NED" },
+      team2: { teamName: "Japan", shortName: "JPN" },
+      group: { groupName: "1. Runde", groupOrderID: 1 },
+      matchResults: [{ resultTypeID: 2, resultName: "Endergebnis", pointsTeam1: 2, pointsTeam2: 2 }],
+      goals: [
+        { scoreTeam1: 1, scoreTeam2: 0, matchMinute: 51, goalGetterName: "Virgil van Dijk" },
+        { scoreTeam1: 1, scoreTeam2: 1, matchMinute: 57, goalGetterName: "Keito Nakamura" }
+      ]
+    });
+
+    expect(parsed.goals.map((goal) => `${goal.scorerName}:${goal.homeScore}-${goal.awayScore}`)).toEqual([
+      "Virgil van Dijk:1-0",
+      "Keito Nakamura:1-1",
+      "Gol por confirmar:2-1",
+      "Gol por confirmar:2-2"
     ]);
   });
 

@@ -30,10 +30,10 @@ export type OpenLigaDbMatch = {
   matchIsFinished: boolean;
   matchResults?: OpenLigaDbResult[];
   goals?: Array<{
-    goalID?: number;
-    scoreTeam1: number;
-    scoreTeam2: number;
-    matchMinute?: number | null;
+    goalID?: number | string | null;
+    scoreTeam1: number | string | null;
+    scoreTeam2: number | string | null;
+    matchMinute?: number | string | null;
     goalGetterID?: number | null;
     goalGetterId?: number | null;
     goalGetterName?: string | null;
@@ -45,6 +45,10 @@ export type OpenLigaDbMatch = {
     groupName?: string;
     groupOrderID?: number;
   };
+};
+
+type ParsedGoal = MatchGoal & {
+  providerGoalId: number | null;
 };
 
 export type OpenLigaDbGoalGetter = {
@@ -162,16 +166,17 @@ export async function fetchOpenLigaDbStandings(env: Env): Promise<OpenLigaDbStan
 
 export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMatch {
   const kickoffAt = normalizeKickoff(match.matchDateTimeUTC || match.matchDateTime);
-  const goals = parseGoals(match.goals || []);
+  const parsedGoals = parseGoals(match.goals || []);
   const results = match.matchResults || [];
   const regularTimeResult = selectRegularTimeResult(results);
   const extraTimeResult = selectExtraTimeResult(results);
   const penaltyResult = selectPenaltyShootoutResult(results);
   const finalResult = penaltyResult ?? extraTimeResult ?? regularTimeResult;
-  const fallbackScore = getLatestGoalScore(goals);
+  const fallbackScore = getLatestGoalScore(parsedGoals);
   const scoreResult = regularTimeResult ?? extraTimeResult ?? penaltyResult;
   const visibleScore = selectVisibleScore(match, scoreResult, fallbackScore);
   const status = getStatus(match, kickoffAt, finalResult);
+  const goals = completeGoalTimeline(parsedGoals, visibleScore);
 
   return {
     providerMatchId: match.matchID,
@@ -210,18 +215,107 @@ export function parseOpenLigaDbStanding(row: OpenLigaDbStanding): ParsedOpenLiga
   };
 }
 
-function parseGoals(goals: NonNullable<OpenLigaDbMatch["goals"]>): MatchGoal[] {
+function parseGoals(goals: NonNullable<OpenLigaDbMatch["goals"]>): ParsedGoal[] {
   return goals
-    .filter((goal) => Number.isFinite(goal.scoreTeam1) && Number.isFinite(goal.scoreTeam2))
-    .map((goal) => ({
-      minute: goal.matchMinute ?? null,
-      scorerName: goal.goalGetterName?.trim() || null,
-      homeScore: goal.scoreTeam1,
-      awayScore: goal.scoreTeam2,
-      isPenalty: goal.isPenalty === true,
-      isOwnGoal: goal.isOwnGoal === true,
-      isOvertime: goal.isOvertime === true
-    }));
+    .map((goal) => {
+      const homeScore = numberOrNull(goal.scoreTeam1);
+      const awayScore = numberOrNull(goal.scoreTeam2);
+      if (homeScore === null || awayScore === null) return null;
+
+      return {
+        minute: numberOrNull(goal.matchMinute),
+        scorerName: goal.goalGetterName?.trim() || null,
+        homeScore,
+        awayScore,
+        isPenalty: goal.isPenalty === true,
+        isOwnGoal: goal.isOwnGoal === true,
+        isOvertime: goal.isOvertime === true,
+        providerGoalId: numberOrNull(goal.goalID)
+      };
+    })
+    .filter((goal): goal is ParsedGoal => goal !== null)
+    .sort(compareParsedGoals);
+}
+
+function completeGoalTimeline(
+  goals: ParsedGoal[],
+  finalScore: Pick<MatchGoal, "homeScore" | "awayScore"> | null
+): MatchGoal[] {
+  let previous = { homeScore: 0, awayScore: 0 };
+  const complete: ParsedGoal[] = [];
+
+  for (const goal of goals) {
+    complete.push(...createMissingGoalsBefore(previous, goal), goal);
+    previous = { homeScore: goal.homeScore, awayScore: goal.awayScore };
+  }
+
+  if (finalScore) {
+    complete.push(...createPlaceholderGoals(previous, finalScore, null));
+  }
+
+  return complete.map(toMatchGoal);
+}
+
+function createMissingGoalsBefore(previous: Pick<MatchGoal, "homeScore" | "awayScore">, current: ParsedGoal): ParsedGoal[] {
+  const homeDelta = current.homeScore - previous.homeScore;
+  const awayDelta = current.awayScore - previous.awayScore;
+  if (homeDelta < 0 || awayDelta < 0 || homeDelta + awayDelta <= 1) return [];
+
+  const currentGoalSide = homeDelta > 0 ? "home" : "away";
+  const targetBeforeCurrent = {
+    homeScore: current.homeScore - (currentGoalSide === "home" ? 1 : 0),
+    awayScore: current.awayScore - (currentGoalSide === "away" ? 1 : 0)
+  };
+  return createPlaceholderGoals(previous, targetBeforeCurrent, current.minute);
+}
+
+function createPlaceholderGoals(
+  previous: Pick<MatchGoal, "homeScore" | "awayScore">,
+  target: Pick<MatchGoal, "homeScore" | "awayScore">,
+  minute: number | null
+): ParsedGoal[] {
+  let homeScore = previous.homeScore;
+  let awayScore = previous.awayScore;
+  const goals: ParsedGoal[] = [];
+
+  while (homeScore < target.homeScore || awayScore < target.awayScore) {
+    if (homeScore < target.homeScore) {
+      homeScore += 1;
+    } else {
+      awayScore += 1;
+    }
+
+    goals.push({
+      minute,
+      scorerName: "Gol por confirmar",
+      homeScore,
+      awayScore,
+      isPenalty: false,
+      isOwnGoal: false,
+      isOvertime: false,
+      providerGoalId: null
+    });
+  }
+
+  return goals;
+}
+
+function compareParsedGoals(left: ParsedGoal, right: ParsedGoal): number {
+  const minuteDiff = (left.minute ?? 999) - (right.minute ?? 999);
+  if (minuteDiff !== 0) return minuteDiff;
+
+  const scoreDiff = left.homeScore + left.awayScore - (right.homeScore + right.awayScore);
+  if (scoreDiff !== 0) return scoreDiff;
+
+  const idDiff = (left.providerGoalId ?? Number.MAX_SAFE_INTEGER) - (right.providerGoalId ?? Number.MAX_SAFE_INTEGER);
+  if (idDiff !== 0) return idDiff;
+
+  return left.homeScore - right.homeScore || left.awayScore - right.awayScore;
+}
+
+function toMatchGoal(goal: ParsedGoal): MatchGoal {
+  const { providerGoalId: _providerGoalId, ...matchGoal } = goal;
+  return matchGoal;
 }
 
 function enrichGoalGetterNames(matches: OpenLigaDbMatch[], goalGetters: OpenLigaDbGoalGetter[]): OpenLigaDbMatch[] {
@@ -354,6 +448,13 @@ function getLiveWindowMs(match: OpenLigaDbMatch): number {
 
 function numberOrZero(value: number | null | undefined): number {
   return Number.isFinite(value) ? Number(value) : 0;
+}
+
+function numberOrNull(value: number | string | null | undefined): number | null {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
