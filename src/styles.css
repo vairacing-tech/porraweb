@@ -717,6 +717,18 @@ button {
   font-variant-numeric: tabular-nums;
 }
 
+.visible-predictions.loading span {
+  pointer-events: none;
+}
+
+.visible-predictions.loading b,
+.visible-predictions.loading em,
+.visible-predictions.loading small {
+  min-height: 12px;
+  border-radius: 999px;
+  background: rgba(20, 120, 50, 0.12);
+}
+
 .knockout-result {
   display: grid;
   gap: 5px;

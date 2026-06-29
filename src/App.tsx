@@ -17,7 +17,7 @@ import {
   User,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   changePassword,
   deleteUser,
@@ -416,7 +416,8 @@ function PredictionCard({
   refreshKey,
   userId,
   featured = false,
-  domId
+  domId,
+  visiblePredictionSlots = 0
 }: {
   match: Match;
   scores: ScoreDraft;
@@ -426,6 +427,7 @@ function PredictionCard({
   userId: string;
   featured?: boolean;
   domId?: string;
+  visiblePredictionSlots?: number;
 }) {
   const locked = isPredictionLocked(match.kickoffAt) || match.status === "finished";
   const draft = scores[match.id] ?? { home: 0, away: 0 };
@@ -476,7 +478,7 @@ function PredictionCard({
       <KnockoutResultDetails match={match} />
       {postMatchPhrase ? <PostMatchPhrase outcome={savedPrediction?.outcome ?? "pending"} phrase={postMatchPhrase} /> : null}
       <MatchGoals match={match} />
-      <VisiblePredictions match={match} refreshKey={refreshKey} />
+      <VisiblePredictions match={match} refreshKey={refreshKey} expectedRows={visiblePredictionSlots} />
       <div className="card-actions">
         {match.isDoublePoints ? <span className="double-chip">Puntos x2</span> : <span />}
         <button className="save-button" type="button" disabled={locked} onClick={() => onSave(match)}>
@@ -557,24 +559,28 @@ function PenaltyShootoutLine({ match }: { match: Match }) {
   );
 }
 
-function VisiblePredictions({ match, refreshKey }: { match: Match; refreshKey: string }) {
+function VisiblePredictions({ match, refreshKey, expectedRows = 0 }: { match: Match; refreshKey: string; expectedRows?: number }) {
   const [predictions, setPredictions] = useState<VisiblePrediction[]>([]);
   const [error, setError] = useState<string | null>(null);
   const locked = isPredictionLocked(match.kickoffAt) || match.status === "finished";
+  const [loading, setLoading] = useState(locked);
 
   useEffect(() => {
     let cancelled = false;
     if (!locked) {
       setPredictions([]);
       setError(null);
+      setLoading(false);
       return;
     }
 
+    setLoading(true);
     fetchMatchPredictions(match.id)
       .then((rows) => {
         if (!cancelled) {
           setPredictions(rows);
           setError(null);
+          setLoading(false);
         }
       })
       .catch((apiError) => {
@@ -582,6 +588,9 @@ function VisiblePredictions({ match, refreshKey }: { match: Match; refreshKey: s
           setPredictions([]);
           setError(apiError instanceof Error ? apiError.message : "No se pudieron cargar pronósticos.");
         }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
 
     return () => {
@@ -591,6 +600,21 @@ function VisiblePredictions({ match, refreshKey }: { match: Match; refreshKey: s
 
   if (!locked) return null;
   if (error) return <p className="visible-predictions muted">{error}</p>;
+  if (loading) {
+    const placeholderRows = Math.max(1, Math.min(12, expectedRows || 1));
+    return (
+      <div className="visible-predictions loading" aria-label="Cargando pronosticos visibles">
+        <strong>PronÃ³sticos visibles</strong>
+        {Array.from({ length: placeholderRows }).map((_, index) => (
+          <span key={`${match.id}-prediction-placeholder-${index}`} aria-hidden="true">
+            <b />
+            <em />
+            <small />
+          </span>
+        ))}
+      </div>
+    );
+  }
   if (predictions.length === 0) return <p className="visible-predictions muted">Aún no hay pronósticos visibles.</p>;
 
   return (
@@ -635,35 +659,27 @@ function MatchesView({
   const [filter, setFilter] = useState<MatchFilter>("all");
   const handledScrollRequestRef = useRef(0);
   const filters = useMemo(() => buildMatchFilters(data.matches), [data.matches]);
-  const matches = useMemo(() => filterMatches(data.matches, filter), [data.matches, filter]);
+  const scrollTarget = useMemo(() => resolveMatchScrollTarget(data.matches, scrollRequest.matchId), [data.matches, scrollRequest.matchId]);
+  const hasPendingScrollRequest = scrollRequest.id !== 0 && handledScrollRequestRef.current !== scrollRequest.id;
+  const scrollTargetFilter = scrollTarget ? matchFilterForScrollTarget(scrollTarget) : "all";
+  const scrollFilter = filters.some((item) => item.value === scrollTargetFilter) ? scrollTargetFilter : "all";
+  const effectiveFilter = hasPendingScrollRequest && scrollTarget ? scrollFilter : filter;
+  const matches = useMemo(() => filterMatches(data.matches, effectiveFilter), [data.matches, effectiveFilter]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (scrollRequest.id === 0 || handledScrollRequestRef.current === scrollRequest.id) return;
-    const target =
-      (scrollRequest.matchId ? matches.find((match) => match.id === scrollRequest.matchId) : null) ??
-      getNextUnstartedMatch(matches) ??
-      findCurrentMatch(matches) ??
-      getLastFinishedMatch(matches) ??
-      matches[0] ??
-      null;
-    if (!target) return;
+    if (filter !== scrollFilter) setFilter(scrollFilter);
+  }, [filter, scrollFilter, scrollRequest.id]);
 
-    const timeoutId = window.setTimeout(() => {
-      const targetElement = document.getElementById(matchCardDomId(target.id));
-      if (!targetElement) return;
-      handledScrollRequestRef.current = scrollRequest.id;
-      scrollElementIntoAppView(targetElement, matchDeepLinkTopOffsetPx);
-    }, 80);
-    const settleTimeoutId = window.setTimeout(() => {
-      const targetElement = document.getElementById(matchCardDomId(target.id));
-      if (targetElement) scrollElementIntoAppView(targetElement, matchDeepLinkTopOffsetPx);
-    }, 420);
+  useLayoutEffect(() => {
+    if (scrollRequest.id === 0 || handledScrollRequestRef.current === scrollRequest.id || !scrollTarget) return;
+    if (!matches.some((match) => match.id === scrollTarget.id)) return;
 
-    return () => {
-      window.clearTimeout(timeoutId);
-      window.clearTimeout(settleTimeoutId);
-    };
-  }, [matches, scrollRequest.id, scrollRequest.matchId]);
+    const targetElement = document.getElementById(matchCardDomId(scrollTarget.id));
+    if (!targetElement) return;
+    handledScrollRequestRef.current = scrollRequest.id;
+    scrollElementIntoAppView(targetElement, matchDeepLinkTopOffsetPx, "auto");
+  }, [matches, scrollRequest.id, scrollTarget]);
 
   return (
     <section className="view-stack">
@@ -673,7 +689,7 @@ function MatchesView({
       </div>
       <div className="segmented match-filters">
         {filters.map((item) => (
-          <button key={item.value} type="button" className={filter === item.value ? "active" : ""} onClick={() => setFilter(item.value)}>
+          <button key={item.value} type="button" className={effectiveFilter === item.value ? "active" : ""} onClick={() => setFilter(item.value)}>
             {item.label}
           </button>
         ))}
@@ -688,6 +704,7 @@ function MatchesView({
           onSave={onSave}
           refreshKey={refreshKey}
           userId={data.user?.id ?? ""}
+          visiblePredictionSlots={data.leaderboard.length}
         />
       ))}
     </section>
@@ -1721,21 +1738,38 @@ function getNextUnstartedMatch<T extends Match>(matches: T[], now = new Date()):
   return sortMatchesByKickoff(matches).find((match) => match.status !== "finished" && match.status !== "live" && new Date(match.kickoffAt).getTime() > nowMs) ?? null;
 }
 
+function resolveMatchScrollTarget<T extends Match>(matches: T[], targetMatchId?: string | null): T | null {
+  const sorted = sortMatchesByKickoff(matches);
+  return (
+    (targetMatchId ? sorted.find((match) => match.id === targetMatchId) : null) ??
+    getNextUnstartedMatch(sorted) ??
+    findCurrentMatch(sorted) ??
+    getLastFinishedMatch(sorted) ??
+    sorted[0] ??
+    null
+  );
+}
+
+function matchFilterForScrollTarget(match: Match): MatchFilter {
+  if (match.stage !== "GROUP") return "knockout";
+  return typeof match.matchday === "number" ? `matchday-${match.matchday}` : "all";
+}
+
 function matchCardDomId(matchId: string): string {
   return `match-card-${matchId}`;
 }
 
-function scrollElementIntoAppView(element: HTMLElement, topOffset = 0): void {
+function scrollElementIntoAppView(element: HTMLElement, topOffset = 0, behavior: ScrollBehavior = "smooth"): void {
   const scrollContainer = element.closest(".app-shell") as HTMLElement | null;
   if (!scrollContainer) {
-    element.scrollIntoView({ behavior: "smooth", block: "start" });
+    element.scrollIntoView({ behavior, block: "start" });
     return;
   }
 
   const containerTop = scrollContainer.getBoundingClientRect().top;
   const elementTop = element.getBoundingClientRect().top;
   const scrollTop = scrollContainer.scrollTop + elementTop - containerTop - topOffset;
-  scrollContainer.scrollTo({ top: Math.max(0, scrollTop), behavior: "smooth" });
+  scrollContainer.scrollTo({ top: Math.max(0, scrollTop), behavior });
 }
 
 function matchCardSubtitle(match: Match): string {
