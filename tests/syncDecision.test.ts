@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { getResultSyncDecision, isLiveToFinishedTransition, selectBestGoalTimeline, shouldRefreshGroupStandingsForMatch } from "../src/server/sync";
+import {
+  calculateGroupStandings,
+  getResultSyncDecision,
+  isLiveToFinishedTransition,
+  selectBestGoalTimeline,
+  shouldRefreshGroupStandingsForMatch
+} from "../src/server/sync";
 import type { MatchGoal } from "../src/shared/types";
 import type { ParsedOpenLigaDbMatch } from "../src/server/providers/openligadb";
 import type { Env } from "../src/server/types";
@@ -174,6 +180,24 @@ describe("result sync cadence decision", () => {
 
     expect(selectBestGoalTimeline(completeStoredGoals, partialProviderGoals, parsedScore(2, 2))).toBe(completeStoredGoals);
   });
+
+  it("calculates group standings from group matches only", () => {
+    const standings = calculateGroupStandings([
+      groupMatch("B", "canada", "Canadá", "bosnia-y-herzegovina", "Bosnia y Herzegovina", 1, 1),
+      groupMatch("B", "catar", "Catar", "suiza", "Suiza", 1, 1),
+      groupMatch("B", "suiza", "Suiza", "bosnia-y-herzegovina", "Bosnia y Herzegovina", 4, 1),
+      groupMatch("B", "canada", "Canadá", "catar", "Catar", 6, 0),
+      groupMatch("B", "suiza", "Suiza", "canada", "Canadá", 2, 1),
+      groupMatch("B", "bosnia-y-herzegovina", "Bosnia y Herzegovina", "catar", "Catar", 3, 1)
+    ]);
+
+    expect(standings.filter((row) => row.groupName === "Grupo B").map((row) => [row.rank, row.teamId, row.played, row.points])).toEqual([
+      [1, "suiza", 3, 7],
+      [2, "canada", 3, 4],
+      [3, "bosnia-y-herzegovina", 3, 4],
+      [4, "catar", 3, 1]
+    ]);
+  });
 });
 
 function goal(minute: number | null, scorerName: string | null, homeScore: number, awayScore: number, isOvertime = false): MatchGoal {
@@ -206,5 +230,36 @@ function parsedScore(homeScore: number, awayScore: number): ParsedOpenLigaDbMatc
     penaltyHomeScore: null,
     penaltyAwayScore: null,
     goals: []
+  };
+}
+
+function groupMatch(
+  groupName: string,
+  homeId: string,
+  homeName: string,
+  awayId: string,
+  awayName: string,
+  homeScore: number,
+  awayScore: number
+) {
+  return {
+    groupName,
+    status: "finished",
+    homeScore,
+    awayScore,
+    homeTeam: {
+      id: homeId,
+      providerTeamId: null,
+      name: homeName,
+      shortCode: homeId.slice(0, 3).toUpperCase(),
+      logoUrl: null
+    },
+    awayTeam: {
+      id: awayId,
+      providerTeamId: null,
+      name: awayName,
+      shortCode: awayId.slice(0, 3).toUpperCase(),
+      logoUrl: null
+    }
   };
 }
