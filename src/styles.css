@@ -745,6 +745,11 @@ button {
   color: #0c7a35;
 }
 
+.knockout-result .regular-time-score {
+  color: #0c7a35;
+  font-weight: 950;
+}
+
 .knockout-result small {
   color: var(--muted);
   font-size: 11px;

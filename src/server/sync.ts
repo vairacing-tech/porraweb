@@ -664,13 +664,20 @@ export function selectBestGoalTimeline(existing: MatchGoal[], incoming: MatchGoa
   if (existing.length === 0) return incoming;
   if (incoming.length === 0) return existing;
 
-  const finalScore =
-    parsed.homeScore !== null && parsed.awayScore !== null
-      ? { homeScore: parsed.homeScore, awayScore: parsed.awayScore }
-      : null;
+  const finalScore = getGoalTimelineFinalScore(parsed);
   const existingScore = goalTimelineCompleteness(existing, finalScore);
   const incomingScore = goalTimelineCompleteness(incoming, finalScore);
   return incomingScore >= existingScore ? incoming : existing;
+}
+
+function getGoalTimelineFinalScore(parsed: ParsedOpenLigaDbMatch): Pick<MatchGoal, "homeScore" | "awayScore"> | null {
+  if (parsed.extraHomeScore !== null && parsed.extraAwayScore !== null) {
+    return { homeScore: parsed.extraHomeScore, awayScore: parsed.extraAwayScore };
+  }
+  if (parsed.homeScore !== null && parsed.awayScore !== null) {
+    return { homeScore: parsed.homeScore, awayScore: parsed.awayScore };
+  }
+  return null;
 }
 
 function goalTimelineCompleteness(goals: MatchGoal[], finalScore: Pick<MatchGoal, "homeScore" | "awayScore"> | null): number {

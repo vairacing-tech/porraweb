@@ -149,6 +149,71 @@ describe("OpenLigaDB provider", () => {
     expect(parsed.penaltyAwayScore).toBe(4);
   });
 
+  it("scores a penalty shootout knockout against the 90-minute result", () => {
+    const parsed = parseOpenLigaDbMatch({
+      matchID: 82112,
+      matchDateTime: "2026-07-03T20:00:00",
+      matchDateTimeUTC: "2026-07-03T18:00:00Z",
+      matchIsFinished: true,
+      team1: { teamName: "Australien", shortName: "AUS" },
+      team2: { teamName: "Aegypten", shortName: "EGY" },
+      group: { groupName: "Sechzehntelfinale", groupOrderID: 4 },
+      matchResults: [
+        { resultTypeID: 1, resultName: "Halbzeit", pointsTeam1: 0, pointsTeam2: 1 },
+        { resultTypeID: 2, resultName: "Endergebnis", pointsTeam1: 3, pointsTeam2: 5 },
+        { resultTypeID: 4, resultName: "nach Verlaengerung", pointsTeam1: 1, pointsTeam2: 1 },
+        { resultTypeID: 5, resultName: "nach Elfmeterschiessen", pointsTeam1: 3, pointsTeam2: 5 }
+      ],
+      goals: [
+        { scoreTeam1: 1, scoreTeam2: 2, matchMinute: null, goalGetterName: "Mahmoud Saber", isPenalty: true },
+        { scoreTeam1: 0, scoreTeam2: 1, matchMinute: 13, goalGetterName: "Emam Ashour" },
+        { scoreTeam1: 1, scoreTeam2: 1, matchMinute: 55, goalGetterName: "Mohamed Hany" },
+        { scoreTeam1: 3, scoreTeam2: 5, matchMinute: null, goalGetterName: "Hossam Abdelmaguid", isPenalty: true }
+      ]
+    });
+
+    expect(parsed.homeScore).toBe(1);
+    expect(parsed.awayScore).toBe(1);
+    expect(parsed.extraHomeScore).toBe(1);
+    expect(parsed.extraAwayScore).toBe(1);
+    expect(parsed.penaltyHomeScore).toBe(3);
+    expect(parsed.penaltyAwayScore).toBe(5);
+    expect(parsed.goals.map((goal) => `${goal.scorerName}:${goal.homeScore}-${goal.awayScore}`)).toEqual([
+      "Emam Ashour:0-1",
+      "Mohamed Hany:1-1"
+    ]);
+  });
+
+  it("scores an extra-time knockout against the 90-minute result", () => {
+    const parsed = parseOpenLigaDbMatch({
+      matchID: 82113,
+      matchDateTime: "2026-07-04T00:00:00",
+      matchDateTimeUTC: "2026-07-03T22:00:00Z",
+      matchIsFinished: true,
+      team1: { teamName: "Argentinien", shortName: "ARG" },
+      team2: { teamName: "Kap Verde", shortName: "CPV" },
+      group: { groupName: "Sechzehntelfinale", groupOrderID: 4 },
+      matchResults: [
+        { resultTypeID: 1, resultName: "Halbzeit", pointsTeam1: 1, pointsTeam2: 0 },
+        { resultTypeID: 2, resultName: "Endergebnis", pointsTeam1: 3, pointsTeam2: 2 },
+        { resultTypeID: 4, resultName: "nach Verlaengerung", pointsTeam1: 3, pointsTeam2: 2 }
+      ],
+      goals: [
+        { scoreTeam1: 1, scoreTeam2: 0, matchMinute: 29, goalGetterName: "Lionel Messi" },
+        { scoreTeam1: 1, scoreTeam2: 1, matchMinute: 59, goalGetterName: "Deroy Duarte" },
+        { scoreTeam1: 2, scoreTeam2: 1, matchMinute: 93, goalGetterName: "Lisandro Martinez" },
+        { scoreTeam1: 2, scoreTeam2: 2, matchMinute: 103, goalGetterName: "Sidny Lopes Cabral" },
+        { scoreTeam1: 3, scoreTeam2: 2, matchMinute: 111, goalGetterName: "Diney Borges" }
+      ]
+    });
+
+    expect(parsed.homeScore).toBe(1);
+    expect(parsed.awayScore).toBe(1);
+    expect(parsed.extraHomeScore).toBe(3);
+    expect(parsed.extraAwayScore).toBe(2);
+    expect(parsed.goals.map((goal) => `${goal.homeScore}-${goal.awayScore}`)).toEqual(["1-0", "1-1", "2-1", "2-2", "3-2"]);
+  });
+
   it("parses standings data into the internal shape", () => {
     expect(
       parseOpenLigaDbStanding({

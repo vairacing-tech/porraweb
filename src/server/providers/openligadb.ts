@@ -51,6 +51,8 @@ type ParsedGoal = MatchGoal & {
   providerGoalId: number | null;
 };
 
+type MatchScore = Pick<MatchGoal, "homeScore" | "awayScore">;
+
 export type OpenLigaDbGoalGetter = {
   goalGetterId?: number;
   goalGetterID?: number;
@@ -173,8 +175,8 @@ export function parseOpenLigaDbMatch(match: OpenLigaDbMatch): ParsedOpenLigaDbMa
   const penaltyResult = selectPenaltyShootoutResult(results);
   const finalResult = penaltyResult ?? extraTimeResult ?? regularTimeResult;
   const fallbackScore = getLatestGoalScore(parsedGoals);
-  const scoreResult = regularTimeResult ?? extraTimeResult ?? penaltyResult;
-  const visibleScore = selectVisibleScore(match, scoreResult, fallbackScore);
+  const regularTimeScore = selectRegularTimeScore(parsedGoals, regularTimeResult, extraTimeResult, penaltyResult);
+  const visibleScore = selectVisibleScore(match, regularTimeScore, fallbackScore);
   const status = getStatus(match, kickoffAt, finalResult);
   const goals = completeGoalTimeline(parsedGoals, visibleScore);
 
@@ -221,9 +223,11 @@ function parseGoals(goals: NonNullable<OpenLigaDbMatch["goals"]>): ParsedGoal[] 
       const homeScore = numberOrNull(goal.scoreTeam1);
       const awayScore = numberOrNull(goal.scoreTeam2);
       if (homeScore === null || awayScore === null) return null;
+      const minute = numberOrNull(goal.matchMinute);
+      if (isPenaltyShootoutGoal(goal, minute)) return null;
 
       return {
-        minute: numberOrNull(goal.matchMinute),
+        minute,
         scorerName: goal.goalGetterName?.trim() || null,
         homeScore,
         awayScore,
@@ -235,6 +239,10 @@ function parseGoals(goals: NonNullable<OpenLigaDbMatch["goals"]>): ParsedGoal[] 
     })
     .filter((goal): goal is ParsedGoal => goal !== null)
     .sort(compareParsedGoals);
+}
+
+function isPenaltyShootoutGoal(goal: NonNullable<OpenLigaDbMatch["goals"]>[number], minute: number | null): boolean {
+  return minute === null && goal.isPenalty === true;
 }
 
 function completeGoalTimeline(
@@ -335,18 +343,63 @@ function enrichGoalGetterNames(matches: OpenLigaDbMatch[], goalGetters: OpenLiga
   }));
 }
 
-function getLatestGoalScore(goals: MatchGoal[]): Pick<MatchGoal, "homeScore" | "awayScore"> | null {
+function getLatestGoalScore(goals: MatchGoal[]): MatchScore | null {
   if (goals.length === 0) return null;
   return goals[goals.length - 1] ?? null;
 }
 
+function selectRegularTimeScore(
+  goals: ParsedGoal[],
+  regularTimeResult: OpenLigaDbResult | null,
+  extraTimeResult: OpenLigaDbResult | null,
+  penaltyResult: OpenLigaDbResult | null
+): MatchScore | null {
+  const publishedRegularTimeScore = resultToScore(regularTimeResult);
+  const hasKnockoutDecider = extraTimeResult !== null || penaltyResult !== null;
+  if (!hasKnockoutDecider) return publishedRegularTimeScore;
+
+  const scoreFromGoals = getScoreAtRegularTimeEnd(goals);
+  if (scoreFromGoals) return scoreFromGoals;
+
+  return resultToScore(extraTimeResult) ?? publishedRegularTimeScore;
+}
+
+function getScoreAtRegularTimeEnd(goals: ParsedGoal[]): MatchScore | null {
+  let previous: MatchScore = { homeScore: 0, awayScore: 0 };
+  let sawGoal = false;
+
+  for (const goal of goals) {
+    if (isExtraTimeGoal(goal)) return getScoreBeforeGoal(previous, goal);
+    previous = { homeScore: goal.homeScore, awayScore: goal.awayScore };
+    sawGoal = true;
+  }
+
+  return sawGoal ? previous : null;
+}
+
+function isExtraTimeGoal(goal: ParsedGoal): boolean {
+  return goal.minute !== null && goal.minute > 90 && goal.isOvertime !== true;
+}
+
+function getScoreBeforeGoal(previous: MatchScore, current: MatchScore): MatchScore {
+  const homeDelta = current.homeScore - previous.homeScore;
+  const awayDelta = current.awayScore - previous.awayScore;
+  if (homeDelta <= 0 && awayDelta <= 0) return previous;
+  if (homeDelta > 0) return { homeScore: current.homeScore - 1, awayScore: current.awayScore };
+  return { homeScore: current.homeScore, awayScore: current.awayScore - 1 };
+}
+
+function resultToScore(result: OpenLigaDbResult | null): MatchScore | null {
+  return result ? { homeScore: result.pointsTeam1, awayScore: result.pointsTeam2 } : null;
+}
+
 function selectVisibleScore(
   match: OpenLigaDbMatch,
-  finalResult: OpenLigaDbResult | null,
-  fallbackScore: Pick<MatchGoal, "homeScore" | "awayScore"> | null
-): Pick<MatchGoal, "homeScore" | "awayScore"> | null {
+  publishedScore: MatchScore | null,
+  fallbackScore: MatchScore | null
+): MatchScore | null {
   if (!match.matchIsFinished && fallbackScore) return fallbackScore;
-  if (finalResult) return { homeScore: finalResult.pointsTeam1, awayScore: finalResult.pointsTeam2 };
+  if (publishedScore) return publishedScore;
   return fallbackScore;
 }
 

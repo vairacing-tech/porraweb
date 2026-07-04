@@ -176,10 +176,10 @@ export function App() {
   }
 
   function handleTabChange(nextTab: Tab, targetMatchId?: string | null) {
-    if (nextTab === "matches") {
+    if (nextTab === "matches" && (targetMatchId || tab !== "matches")) {
       setMatchScrollRequest((current) => ({ id: current.id + 1, matchId: targetMatchId ?? null }));
     }
-    setTab(nextTab);
+    if (tab !== nextTab) setTab(nextTab);
   }
 
   if (loading || (!data && !loadError)) {
@@ -535,11 +535,13 @@ function KnockoutResultDetails({ match, compact = false, showScoringNote = true 
 
   const hasExtraTime = hasScore(match.extraHomeScore, match.extraAwayScore);
   const hasPenalties = hasScore(match.penaltyHomeScore, match.penaltyAwayScore);
+  const regularTimeScore = getRegularTimeScore(match);
   const winner = getWinnerTeam(match);
 
   return (
     <div className={`knockout-result ${compact ? "compact" : ""}`}>
       {showScoringNote ? <small>Pronóstico y puntos: marcador al final de los 90 minutos.</small> : null}
+      {!compact && regularTimeScore ? <span className="regular-time-score">90 min (puntos): {regularTimeScore.home} - {regularTimeScore.away}</span> : null}
       {winner ? <strong>Ganador: {winner.name}</strong> : null}
       {hasExtraTime ? (
         <span>Prórroga: {match.extraHomeScore} - {match.extraAwayScore}</span>
@@ -1867,10 +1869,30 @@ function getOwnPostMatchPhrase(match: Match, prediction: MyPrediction | null, us
 function getVisibleMatchScore(match: Match): { home: number; away: number } | null {
   const latestGoalScore = getLatestGoalScore(match);
   if (match.status === "live" && latestGoalScore) return latestGoalScore;
+  if (match.stage !== "GROUP" && match.status === "finished") {
+    const decisiveScore = getDecisiveMatchScore(match);
+    if (decisiveScore) return decisiveScore;
+  }
+  const regularTimeScore = getRegularTimeScore(match);
+  if (regularTimeScore) return regularTimeScore;
+  return latestGoalScore;
+}
+
+function getRegularTimeScore(match: Match): { home: number; away: number } | null {
   if (match.homeScore !== null && match.homeScore !== undefined && match.awayScore !== null && match.awayScore !== undefined) {
     return { home: match.homeScore, away: match.awayScore };
   }
-  return latestGoalScore;
+  return null;
+}
+
+function getDecisiveMatchScore(match: Match): { home: number; away: number } | null {
+  if (hasScore(match.penaltyHomeScore, match.penaltyAwayScore)) {
+    return { home: match.penaltyHomeScore!, away: match.penaltyAwayScore! };
+  }
+  if (hasScore(match.extraHomeScore, match.extraAwayScore)) {
+    return { home: match.extraHomeScore!, away: match.extraAwayScore! };
+  }
+  return getRegularTimeScore(match);
 }
 
 function getLatestGoalScore(match: Match): { home: number; away: number } | null {
