@@ -4,6 +4,9 @@ Web movil para la liga fija `Fortilin`.
 
 ## Acceso
 
+- Produccion Cloudflare: `https://porra-fortilin-app.vairacing.workers.dev`
+- Vercel: `https://porraweb-vairacing-s-projects.vercel.app`
+  - Nota: este despliegue puede redirigir al login de Vercel si Deployment Protection esta activo.
 - Participantes: crean usuario desde la pantalla inicial. No hay codigo de liga ni codigo de admin.
 - El admin se crea automaticamente al inicializar D1. No participa en la liga, no aparece en la clasificacion y no suma puntos.
 
