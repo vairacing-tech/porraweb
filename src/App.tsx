@@ -1167,7 +1167,8 @@ function ProfileView({
 }
 
 function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefresh: () => Promise<void>; onNotice: (message: string) => void }) {
-  const [matchId, setMatchId] = useState(data.matches[0]?.id || "");
+  const defaultAdminMatchId = useMemo(() => getAdminDefaultMatch(data.matches)?.id ?? "", [data.matches]);
+  const [matchId, setMatchId] = useState(defaultAdminMatchId);
   const [home, setHome] = useState(0);
   const [away, setAway] = useState(0);
   const users = data.adminUsers ?? [];
@@ -1196,6 +1197,10 @@ function AdminPanel({ data, onRefresh, onNotice }: { data: BootstrapData; onRefr
     () => data.squadPlayers.filter((player) => player.teamId === bonusScorerTeamId),
     [data.squadPlayers, bonusScorerTeamId]
   );
+
+  useEffect(() => {
+    if (!matchId || !match) setMatchId(defaultAdminMatchId);
+  }, [defaultAdminMatchId, match, matchId]);
 
   useEffect(() => {
     if (!targetUserId && users[0]) setTargetUserId(users[0].id);
@@ -1738,6 +1743,17 @@ function getLastFinishedMatch<T extends Match>(matches: T[]): T | null {
 function getNextUnstartedMatch<T extends Match>(matches: T[], now = new Date()): T | null {
   const nowMs = now.getTime();
   return sortMatchesByKickoff(matches).find((match) => match.status !== "finished" && match.status !== "live" && new Date(match.kickoffAt).getTime() > nowMs) ?? null;
+}
+
+function getAdminDefaultMatch<T extends Match>(matches: T[]): T | null {
+  const sorted = sortMatchesByKickoff(matches);
+  return (
+    findCurrentMatch(sorted) ??
+    getLastFinishedMatch(sorted) ??
+    getNextUnstartedMatch(sorted) ??
+    sorted[0] ??
+    null
+  );
 }
 
 function resolveMatchScrollTarget<T extends Match>(matches: T[], targetMatchId?: string | null): T | null {
