@@ -850,6 +850,89 @@ button {
   text-align: right;
 }
 
+.achievement-ranking-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+}
+
+.achievement-board {
+  min-width: 0;
+}
+
+.achievement-board-head,
+.achievement-board-row {
+  display: grid;
+  grid-template-columns: 30px 30px minmax(0, 1fr) minmax(48px, auto) auto;
+  align-items: center;
+  gap: 5px;
+}
+
+.achievement-board-head {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.achievement-board-row {
+  width: 100%;
+  min-height: 42px;
+  border: 0;
+  border-top: 1px solid var(--border);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.achievement-board-row:active {
+  background: rgba(20, 120, 50, 0.08);
+}
+
+.achievement-board-row strong {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.achievement-board-row b {
+  color: #116b2d;
+  font-size: 11px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.achievement-mini-marks {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.achievement-mini-mark {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #73df4f, #18a842);
+  color: white;
+}
+
+.achievement-zero-mark {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .rank {
   display: grid;
   place-items: center;

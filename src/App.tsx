@@ -43,7 +43,7 @@ import {
 import { getPostMatchPhrase, getPreviewPhrase } from "./domain/fortilinCopy";
 import { isPredictionLocked } from "./domain/scoring";
 import { getTopScorers } from "./domain/topScorers";
-import { achievementDefinitions } from "./shared/achievements";
+import { achievementDefinitionById, achievementDefinitions } from "./shared/achievements";
 import type { Match, MatchStage, PredictionOutcome, SquadPlayer, Team, UserAchievement } from "./shared/types";
 
 type Tab = "home" | "matches" | "leaderboard" | "world" | "bonus" | "profile";
@@ -710,13 +710,16 @@ function MatchesView({
 
 function LeaderboardView({ data, onSelectUser }: { data: BootstrapData; onSelectUser: (userId: string) => void }) {
   return (
-    <section className="card full-card">
-      <div className="section-title">
-        <Medal size={18} />
-        <span>Clasificación</span>
-      </div>
-      <LeaderboardRows rows={data.leaderboard} onSelect={onSelectUser} />
-    </section>
+    <>
+      <section className="card full-card">
+        <div className="section-title">
+          <Medal size={18} />
+          <span>Clasificación</span>
+        </div>
+        <LeaderboardRows rows={data.leaderboard} onSelect={onSelectUser} />
+      </section>
+      <AchievementLeaderboardRows rows={data.achievementLeaderboard} onSelect={onSelectUser} />
+    </>
   );
 }
 
@@ -1578,6 +1581,48 @@ function LeaderboardRows({
         </button>
       ))}
     </div>
+  );
+}
+
+export function AchievementLeaderboardRows({
+  rows,
+  onSelect
+}: {
+  rows: BootstrapData["achievementLeaderboard"];
+  onSelect: (userId: string) => void;
+}) {
+  return (
+    <section className="card full-card achievement-ranking-card">
+      <div className="section-title">
+        <Award size={18} />
+        <span>Ranking de logros</span>
+      </div>
+      <div className="achievement-board">
+        <div className="achievement-board-head" aria-hidden="true">
+          <span>Pos.</span><span /><span>Jugador</span><span>Marcas</span><span>Total</span>
+        </div>
+        {rows.length === 0 ? <p className="empty-state">Aún no hay participantes.</p> : null}
+        {rows.map((row) => (
+          <button className="achievement-board-row" type="button" key={row.userId} data-user-id={row.userId} onClick={() => onSelect(row.userId)}>
+            <span className={`rank rank-${row.rank}`}>{row.rank}</span>
+            <UserAvatar name={row.displayName} avatarUrl={row.avatarUrl} small />
+            <strong>{row.displayName}</strong>
+            <span className="achievement-mini-marks" aria-label={`${row.achievementCount} logros`}>
+              {row.achievementIds.slice(0, 3).map((achievementId) => {
+                const achievement = achievementDefinitionById.get(achievementId);
+                return (
+                  <span className="achievement-mini-mark" key={achievementId} title={achievement?.name} aria-label={achievement?.name}>
+                    <Award size={13} />
+                  </span>
+                );
+              })}
+              {row.achievementCount === 0 ? <span className="achievement-zero-mark">Sin logros</span> : null}
+            </span>
+            <b>{row.achievementCount} logros</b>
+          </button>
+        ))}
+      </div>
+    </section>
   );
 }
 
