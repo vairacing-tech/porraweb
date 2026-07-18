@@ -28,6 +28,15 @@ export interface AchievementDefinition {
   description: string;
 }
 
+export interface AchievementLeaderboardRow {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  achievementIds: AchievementId[];
+  achievementCount: number;
+  rank: number;
+}
+
 export interface UserAchievement extends AchievementDefinition {
   unlockedAt: string;
   metadata: Record<string, unknown>;
