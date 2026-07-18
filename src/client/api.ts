@@ -65,7 +65,8 @@ export interface RegisterInput {
 }
 
 export async function fetchBootstrap(): Promise<BootstrapData> {
-  return await request<BootstrapData>("/api/bootstrap");
+  const bootstrap = await request<BootstrapData>("/api/bootstrap");
+  return { ...bootstrap, achievementLeaderboard: bootstrap.achievementLeaderboard ?? [] };
 }
 
 export async function login(username: string, password: string): Promise<void> {

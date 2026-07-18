@@ -708,7 +708,7 @@ function MatchesView({
   );
 }
 
-function LeaderboardView({ data, onSelectUser }: { data: BootstrapData; onSelectUser: (userId: string) => void }) {
+export function LeaderboardView({ data, onSelectUser }: { data: BootstrapData; onSelectUser: (userId: string) => void }) {
   return (
     <>
       <section className="card full-card">
@@ -718,7 +718,11 @@ function LeaderboardView({ data, onSelectUser }: { data: BootstrapData; onSelect
         </div>
         <LeaderboardRows rows={data.leaderboard} onSelect={onSelectUser} />
       </section>
-      <AchievementLeaderboardRows rows={data.achievementLeaderboard} onSelect={onSelectUser} />
+      <AchievementLeaderboardRows
+        rows={data.achievementLeaderboard}
+        onSelect={onSelectUser}
+        emptyMessage={data.leaderboard.length > 0 ? "El ranking de logros no está disponible todavía." : undefined}
+      />
     </>
   );
 }
@@ -1586,10 +1590,12 @@ function LeaderboardRows({
 
 export function AchievementLeaderboardRows({
   rows,
-  onSelect
+  onSelect,
+  emptyMessage = "Aún no hay participantes."
 }: {
   rows: BootstrapData["achievementLeaderboard"];
   onSelect: (userId: string) => void;
+  emptyMessage?: string;
 }) {
   return (
     <section className="card full-card achievement-ranking-card">
@@ -1601,7 +1607,7 @@ export function AchievementLeaderboardRows({
         <div className="achievement-board-head" aria-hidden="true">
           <span>Pos.</span><span /><span>Jugador</span><span>Marcas</span><span>Total</span>
         </div>
-        {rows.length === 0 ? <p className="empty-state">Aún no hay participantes.</p> : null}
+        {rows.length === 0 ? <p className="empty-state">{emptyMessage}</p> : null}
         {rows.map((row) => (
           <button className="achievement-board-row" type="button" key={row.userId} data-user-id={row.userId} onClick={() => onSelect(row.userId)}>
             <span className={`rank rank-${row.rank}`}>{row.rank}</span>
