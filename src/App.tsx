@@ -42,6 +42,7 @@ import {
 } from "./client/api";
 import { getPostMatchPhrase, getPreviewPhrase } from "./domain/fortilinCopy";
 import { isPredictionLocked } from "./domain/scoring";
+import { getTopScorers } from "./domain/topScorers";
 import { achievementDefinitions } from "./shared/achievements";
 import type { Match, MatchStage, PredictionOutcome, SquadPlayer, Team, UserAchievement } from "./shared/types";
 
@@ -56,12 +57,6 @@ type MatchFilter = "all" | "knockout" | `matchday-${number}`;
 type MatchScrollRequest = { id: number; matchId?: string | null };
 
 type WorldMode = "knockout" | "groups";
-
-type ScorerRow = {
-  player: string;
-  teamName: string;
-  goals: number;
-};
 
 const matchDeepLinkTopOffsetPx = 96;
 
@@ -1991,80 +1986,6 @@ function sortGroupName(left: string, right: string): number {
   const leftLetter = left.match(/[A-Z]$/i)?.[0] ?? left;
   const rightLetter = right.match(/[A-Z]$/i)?.[0] ?? right;
   return leftLetter.localeCompare(rightLetter, "es", { numeric: true });
-}
-
-function getTopScorers(matches: Match[], squadPlayers: SquadPlayer[] = []): ScorerRow[] {
-  const scorers = new Map<string, ScorerRow>();
-
-  for (const match of matches) {
-    let previousHome = 0;
-    let previousAway = 0;
-    for (const goal of match.goals || []) {
-      if (!goal.scorerName || goal.isOwnGoal) {
-        previousHome = goal.homeScore;
-        previousAway = goal.awayScore;
-        continue;
-      }
-
-      const teamId = goal.homeScore > previousHome ? match.homeTeam.id : goal.awayScore > previousAway ? match.awayTeam.id : null;
-      const teamName = goal.homeScore > previousHome ? match.homeTeam.name : goal.awayScore > previousAway ? match.awayTeam.name : "";
-      const player = canonicalScorerName(goal.scorerName, teamId, squadPlayers);
-      const key = `${player}|${teamName}`;
-      const current = scorers.get(key) ?? { player, teamName, goals: 0 };
-      current.goals += 1;
-      scorers.set(key, current);
-      previousHome = goal.homeScore;
-      previousAway = goal.awayScore;
-    }
-  }
-
-  return [...scorers.values()].sort((left, right) => right.goals - left.goals || left.player.localeCompare(right.player)).slice(0, 20);
-}
-
-function canonicalScorerName(name: string, teamId: string | null, squadPlayers: SquadPlayer[]): string {
-  if (!teamId) return name;
-  const candidates = squadPlayers.filter((player) => player.teamId === teamId);
-  return findPersonNameMatch(name, candidates.map((player) => player.name)) ?? name;
-}
-
-function findPersonNameMatch(name: string, candidates: string[]): string | null {
-  const normalizedName = normalizePersonName(name);
-  if (!normalizedName) return null;
-
-  for (const candidate of candidates) {
-    const normalizedCandidate = normalizePersonName(candidate);
-    if (normalizedCandidate === normalizedName) return candidate;
-    if (normalizedCandidate.includes(normalizedName) || normalizedName.includes(normalizedCandidate)) return candidate;
-  }
-
-  const nameTokens = normalizedName.split(" ").filter(Boolean);
-  const lastName = nameTokens[nameTokens.length - 1];
-  const firstInitial = nameTokens[0]?.[0];
-  const tokenSet = new Set(nameTokens);
-
-  for (const candidate of candidates) {
-    const candidateTokens = normalizePersonName(candidate).split(" ").filter(Boolean);
-    if (nameTokens.length >= 2 && candidateTokens.includes(lastName) && candidateTokens.some((token) => token[0] === firstInitial)) {
-      return candidate;
-    }
-    if (nameTokens.length >= 2 && nameTokens.every((token) => candidateTokens.includes(token))) {
-      return candidate;
-    }
-    if (candidateTokens.length >= 2 && candidateTokens.every((token) => tokenSet.has(token))) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-function normalizePersonName(name: string): string {
-  return name
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
 }
 
 function shortTeam(name: string): string {
