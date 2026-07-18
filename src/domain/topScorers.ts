@@ -32,7 +32,7 @@ export function getTopScorers(matches: Match[], squadPlayers: SquadPlayer[] = []
     }
   }
 
-  return [...scorers.values()].sort((left, right) => right.goals - left.goals || left.player.localeCompare(right.player)).slice(0, 20);
+  return [...scorers.values()].sort((left, right) => right.goals - left.goals || left.player.localeCompare(right.player));
 }
 
 function canonicalScorerName(name: string, teamId: string, squadPlayers: SquadPlayer[]): string {
