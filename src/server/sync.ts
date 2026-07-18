@@ -1,6 +1,5 @@
 import { createId } from "./crypto";
 import { ensureSeeded, recalculateMatch } from "./db";
-import { safeEvaluateAchievements } from "./achievements";
 import { resolveKnockoutMatches } from "./knockout";
 import {
   fetchOpenLigaDbMatches,
@@ -10,6 +9,7 @@ import {
   type ParsedOpenLigaDbMatch
 } from "./providers/openligadb";
 import type { MatchGoal } from "../shared/types";
+import { runPostResultEvaluation } from "./resultCompletion";
 import type { Env } from "./types";
 
 type MatchSyncRow = {
@@ -270,13 +270,16 @@ async function runOpenLigaDbResultSync(env: Env, decision: ResultSyncDecision): 
       standingsUpdated = await syncOpenLigaDbStandings(env, liveStandingGroups);
     }
     const resolvedAfter = decision.includeAuxiliaryData || runCompletionFullSync ? await resolveKnockoutMatches(env) : 0;
-    if (updated > 0) await safeEvaluateAchievements(env);
+    const bonusEvaluation = await runPostResultEvaluation(env);
+    const bonusMessage = bonusEvaluation.applied
+      ? ` Bonus evaluados: ${bonusEvaluation.evaluated}, actualizados: ${bonusEvaluation.changed}.`
+      : " Bonus pendientes hasta finalizar la final con goleadores completos.";
     const ranAuxiliaryData = decision.includeAuxiliaryData || runCompletionFullSync;
     const message = ranAuxiliaryData
-      ? `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado, clasificación mundial ${standingsUpdated} equipos, cruces resueltos ${resolvedBefore + resolvedAfter}.`
+      ? `OpenLigaDB: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, ${teamsUpdated} equipos con logo revisado, clasificación mundial ${standingsUpdated} equipos, cruces resueltos ${resolvedBefore + resolvedAfter}.${bonusMessage}`
       : runLiveStandingsSync
-        ? `OpenLigaDB live: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, clasificación de grupos ${[...liveStandingGroups].join(", ")} actualizada (${standingsUpdated} equipos).`
-        : `OpenLigaDB live: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados.`;
+        ? `OpenLigaDB live: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados, clasificación de grupos ${[...liveStandingGroups].join(", ")} actualizada (${standingsUpdated} equipos).${bonusMessage}`
+        : `OpenLigaDB live: ${targets.length} partidos objetivo, ${matches.length} partidos leídos, ${linked} enlazados, ${updated} resultados actualizados.${bonusMessage}`;
     await logSync(env, "ok", 0, message, ranAuxiliaryData ? "openligadb" : decision.provider);
     return { ok: true, requestsUsed: 0, message };
   } catch (error) {
@@ -795,7 +798,7 @@ async function getSyncMatchTargets(env: Env): Promise<MatchSyncRow[]> {
      )
      OR (
        status = 'finished'
-       AND kickoff_at BETWEEN ?3 AND ?4
+       AND (kickoff_at BETWEEN ?3 AND ?4 OR stage = 'FINAL')
      )
      ORDER BY kickoff_at ASC`
   )
