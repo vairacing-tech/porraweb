@@ -1,12 +1,27 @@
-import { evaluateAchievementUnlocks, type AchievementLeaderboardRow, type AchievementMatch, type AchievementParticipant, type AchievementPrediction } from "../domain/achievements";
+import {
+  evaluateAchievementUnlocks,
+  type AchievementLeaderboardRow as AchievementPoolLeaderboardRow,
+  type AchievementMatch,
+  type AchievementParticipant,
+  type AchievementPrediction
+} from "../domain/achievements";
+import { rankAchievementRows } from "../domain/achievementRanking";
 import { getAchievementDefinition } from "../shared/achievements";
-import type { AchievementId, PredictionOutcome, UserAchievement } from "../shared/types";
+import type { AchievementId, AchievementLeaderboardRow, PredictionOutcome, UserAchievement } from "../shared/types";
+import { getLeaderboard } from "./db";
 import type { Env } from "./types";
 
 type AchievementRow = {
   achievement_id: AchievementId;
   unlocked_at: string;
   metadata_json: string | null;
+};
+
+type AchievementLeaderboardDbRow = {
+  user_id: string;
+  display_name: string;
+  avatar_url: string | null;
+  achievement_id: AchievementId | null;
 };
 
 export async function safeEvaluateAchievements(env: Env, leagueId = "fortilin"): Promise<void> {
@@ -22,6 +37,31 @@ export async function safeGetUserAchievements(env: Env, userId: string, leagueId
     return await getUserAchievements(env, userId, leagueId);
   } catch (error) {
     console.error("ACHIEVEMENT READ ERROR", { userId, error });
+    return [];
+  }
+}
+
+export async function safeGetAchievementLeaderboard(
+  env: Env,
+  leagueId = "fortilin"
+): Promise<AchievementLeaderboardRow[]> {
+  try {
+    const [achievementRows, leaderboard] = await Promise.all([
+      getAchievementLeaderboardRows(env, leagueId),
+      getLeaderboard(env, leagueId)
+    ]);
+    const poolRanks = new Map(leaderboard.map((row) => [row.userId, row.rank]));
+    return rankAchievementRows(
+      achievementRows.map((row) => ({
+        userId: row.user_id,
+        displayName: row.display_name,
+        avatarUrl: row.avatar_url,
+        achievementId: row.achievement_id
+      })),
+      poolRanks
+    );
+  } catch (error) {
+    console.error("ACHIEVEMENT LEADERBOARD READ ERROR", { leagueId, error });
     return [];
   }
 }
@@ -162,7 +202,7 @@ async function getAchievementMatches(env: Env): Promise<AchievementMatch[]> {
   }));
 }
 
-async function getAchievementLeaderboard(env: Env, leagueId: string): Promise<AchievementLeaderboardRow[]> {
+async function getAchievementLeaderboard(env: Env, leagueId: string): Promise<AchievementPoolLeaderboardRow[]> {
   const { results } = await env.DB.prepare(
     `SELECT u.id AS user_id,
             COALESCE(SUM(p.points), 0) + COALESCE(MAX(b.points), 0) AS total_points,
@@ -184,6 +224,22 @@ async function getAchievementLeaderboard(env: Env, leagueId: string): Promise<Ac
     exacts: row.exacts,
     rank: index + 1
   }));
+}
+
+async function getAchievementLeaderboardRows(env: Env, leagueId: string): Promise<AchievementLeaderboardDbRow[]> {
+  const { results } = await env.DB.prepare(
+    `SELECT u.id AS user_id, u.display_name, u.avatar_url, ua.achievement_id
+     FROM league_members lm
+     JOIN users u ON u.id = lm.user_id
+     LEFT JOIN user_achievements ua
+       ON ua.league_id = lm.league_id AND ua.user_id = u.id
+     WHERE lm.league_id = ?1
+     ORDER BY u.display_name COLLATE NOCASE, ua.unlocked_at DESC`
+  )
+    .bind(leagueId)
+    .all<AchievementLeaderboardDbRow>();
+
+  return results;
 }
 
 async function isFinalFinished(env: Env): Promise<boolean> {

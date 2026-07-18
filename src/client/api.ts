@@ -1,4 +1,14 @@
-import type { BonusPrediction, LeaderboardRow, Match, Prediction, SquadPlayer, Team, UserAchievement, WorldStanding } from "../shared/types";
+import type {
+  AchievementLeaderboardRow,
+  BonusPrediction,
+  LeaderboardRow,
+  Match,
+  Prediction,
+  SquadPlayer,
+  Team,
+  UserAchievement,
+  WorldStanding
+} from "../shared/types";
 
 export interface BootstrapData {
   appName: string;
@@ -12,6 +22,7 @@ export interface BootstrapData {
   leaderboard: LeaderboardRow[];
   bonus: BonusPrediction | null;
   achievements: UserAchievement[];
+  achievementLeaderboard: AchievementLeaderboardRow[];
   adminUsers?: AdminUser[];
   adminPredictions?: Prediction[];
   now: string;

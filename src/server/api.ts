@@ -1,5 +1,5 @@
 import { clearSessionCookie, createSession, getAuthUser, loginUser, sessionCookie } from "./auth";
-import { safeEvaluateAchievements, safeGetUserAchievements } from "./achievements";
+import { safeEvaluateAchievements, safeGetAchievementLeaderboard, safeGetUserAchievements } from "./achievements";
 import {
   createBonus,
   deleteUserAsAdmin,
@@ -82,6 +82,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         worldStandings,
         bonus,
         achievements,
+        achievementLeaderboard,
         adminUsers,
         adminPredictions
       ] = await Promise.all([
@@ -92,6 +93,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         getWorldStandings(env),
         user ? getBonus(env, user.id) : Promise.resolve(null),
         user ? safeGetUserAchievements(env, user.id) : Promise.resolve([]),
+        safeGetAchievementLeaderboard(env),
         user?.isAdmin ? getLeagueUsers(env) : Promise.resolve(undefined),
         user?.isAdmin ? getLeaguePredictions(env) : Promise.resolve(undefined)
       ]);
@@ -119,6 +121,7 @@ export async function handleApi(request: Request, env: Env): Promise<Response> {
         leaderboard,
         bonus,
         achievements,
+        achievementLeaderboard,
         adminUsers,
         adminPredictions,
         now
